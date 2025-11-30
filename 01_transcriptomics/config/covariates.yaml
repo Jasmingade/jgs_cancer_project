@@ -1,0 +1,33 @@
+# ============================================================
+# covariates.yaml
+# ------------------------------------------------------------
+# Defines which clinical covariates to include in CoxPH models.
+# - baseline_covariates: always included (unless missing)
+# - conditional_covariates: included only if coverage ≥ threshold
+# ============================================================
+
+baseline_covariates:
+  - age
+
+conditional_covariates:
+  - name: sex
+    include_if: sex
+    coverage_threshold: 0.8      # include if both sexes are represented in ≥ 80% of samples
+    require_balanced: true       # require class balance check
+    min_class_prop: 0.2          # at least 20% in the minority class
+
+  - name: stage
+    include_if: stage
+    coverage_threshold: 0.8         # include if ≥ 80% have valid stage info
+
+  - name: subtype
+    include_if: subtype
+    coverage_threshold: 0.8         # include if ≥ 80% have subtype info
+
+# Expected stage levels (used for ordering)
+stage_levels:
+  - I
+  - II
+  - III
+  - IV
+

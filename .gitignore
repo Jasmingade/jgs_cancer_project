@@ -1,0 +1,45 @@
+# OS/files
+.DS_Store
+Thumbs.db
+
+# Project-specific ignores
+01_transcriptomics/data_delete?
+01_transcriptomics/data
+01_transcriptomics/out
+01_transcriptomics/logs
+
+02_proteomics/data
+02_proteomics/out
+02_proteomics/logs
+
+
+
+# R / renv
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+renv/library/
+renv/staging/
+
+# Python / Conda
+__pycache__/
+.ipynb_checkpoints/
+.env
+.venv
+.envrc
+
+# Snakemake / logs / temp
+.snakemake/
+logs/
+scratch/
+analysis/**/tmp/
+analysis/**/out/**/*.png
+analysis/**/out/**/*.pdf
+
+# Large intermediates (optional)
+analysis/**/out/*.rds
+analysis/**/out/*.RData
+
+# Data: keep immutable inputs tracked if small; otherwise ignore heavy
+data/**/large/*
