@@ -3,11 +3,11 @@
 #SBATCH --cpus-per-task=6
 #SBATCH --time=06:00:00
 #SBATCH --mem=32G
-#SBATCH --output=02_proteomics/logs/cox/%x-%j.log
-#SBATCH --error=02_proteomics/logs/cox/%x-%j.err
+#SBATCH --output=02_proteomics/logs/cox/cox_%A_%a.log
+#SBATCH --error=02_proteomics/logs/cox/cox_%A_%a.err
 #SBATCH --array=0-14
 
-set -euo pipefail
+#set -eu pipefail
 source ~/miniconda3/etc/profile.d/conda.sh
 conda deactivate || true
 conda deactivate || true

@@ -3,7 +3,6 @@
 Thumbs.db
 
 # Project-specific ignores
-01_transcriptomics/data_delete?
 01_transcriptomics/data
 01_transcriptomics/out
 01_transcriptomics/logs
@@ -11,8 +10,6 @@ Thumbs.db
 02_proteomics/data
 02_proteomics/out
 02_proteomics/logs
-
-
 
 # R / renv
 .Rproj.user/

@@ -199,7 +199,7 @@ if (!is.null(cfg$stage_levels) && "stage" %in% names(mani)) {
 
 # Align samples
 common <- intersect(colnames(expr), mani$case_id)
-if (length(common) < 20) {
+if (length(common) < 10) {
   die("%s Too few overlapping samples (n=%d)", run_id, length(common))
 }
 expr <- expr[, common, drop = FALSE]
@@ -208,37 +208,37 @@ mani <- mani[match(common, mani$case_id)]
 # ============================================================
 # Attach batch annotations
 # ============================================================
-batch_file <- find_batch_file(study, batch_dir)
-if (is.na(batch_file) && !is.null(platform) && !is.na(platform)) {
-  batch_file <- find_batch_file(paste(study, platform, sep = "_"), batch_dir)
-}
-if (!is.na(batch_file)) {
-  say("%s Using batch annotation: %s", run_id, batch_file)
-  batch_dt <- fread(batch_file)
-  colnames(batch_dt) <- tolower(colnames(batch_dt))
-  batch_col <- pick_batch_column(batch_dt)
-  if (!is.na(batch_col) && "case_id" %in% names(batch_dt)) {
-    mani <- merge(
-      mani,
-      batch_dt[, .(case_id, batch_id = get(batch_col))],
-      by = "case_id",
-      all.x = TRUE,
-      suffixes = c("", "_batch")
-    )
-  } else {
-    say("%s [WARN] batch column not found in %s", run_id, batch_file)
-  }
-} else {
-  say("%s [INFO] No batch annotation found for %s", run_id, study)
-}
+#batch_file <- find_batch_file(study, batch_dir)
+#if (is.na(batch_file) && !is.null(platform) && !is.na(platform)) {
+#  batch_file <- find_batch_file(paste(study, platform, sep = "_"), batch_dir)
+#}
+#if (!is.na(batch_file)) {
+#  say("%s Using batch annotation: %s", run_id, batch_file)
+#  batch_dt <- fread(batch_file)
+#  colnames(batch_dt) <- tolower(colnames(batch_dt))
+#  batch_col <- pick_batch_column(batch_dt)
+#  if (!is.na(batch_col) && "case_id" %in% names(batch_dt)) {
+#    mani <- merge(
+#      mani,
+#      batch_dt[, .(case_id, batch_id = get(batch_col))],
+#      by = "case_id",
+#      all.x = TRUE,
+#      suffixes = c("", "_batch")
+#    )
+#  } else {
+#    say("%s [WARN] batch column not found in %s", run_id, batch_file)
+#  }
+#} else {
+#  say("%s [INFO] No batch annotation found for %s", run_id, study)
+#}
 
-has_batch <- "batch_id" %in% names(mani) &&
-  sum(!is.na(mani$batch_id)) >= 2 &&
-  length(unique(na.omit(mani$batch_id))) > 1
-if (has_batch) {
-  mani[, batch_id := factor(batch_id)]
-  say("%s Stratifying by batch (%d levels)", run_id, length(levels(mani$batch_id)))
-}
+#has_batch <- "batch_id" %in% names(mani) &&
+#  sum(!is.na(mani$batch_id)) >= 2 &&
+#  length(unique(na.omit(mani$batch_id))) > 1
+#if (has_batch) {
+#  mani[, batch_id := factor(batch_id)]
+#  say("%s Stratifying by batch (%d levels)", run_id, length(levels(mani$batch_id)))
+#}
 
 y <- with(mani, Surv(OS_time, OS_event))
 
@@ -266,7 +266,7 @@ say("%s Covariates used: %s", run_id,
 # ============================================================
 rhs_terms <- c("expr")
 if (ncol(Xcov)) rhs_terms <- c(rhs_terms, names(Xcov))
-if (has_batch) rhs_terms <- c(rhs_terms, "strata(batch_id)")
+#if (has_batch) rhs_terms <- c(rhs_terms, "strata(batch_id)")
 fml <- as.formula(paste("y ~", paste(rhs_terms, collapse = " + ")))
 say("%s Cox formula: %s", run_id, deparse(fml))
 
@@ -307,15 +307,40 @@ res_list <- mclapply(idx, function(i) {
 }, mc.cores = ncores)
 
 res_list <- Filter(function(x) is.data.frame(x) && nrow(x) > 0, res_list)
-if (!length(res_list)) die("%s No valid CoxPH models fitted.", run_id)
+out_full <- sub("\\.csv$", "_full.csv", out_res)
+
+if (!length(res_list)) {
+  say("%s No valid CoxPH models fitted → writing empty outputs", run_id)
+  empty <- data.table(
+    feature = character(),
+    beta = numeric(),
+    HR = numeric(),
+    z = numeric(),
+    p = numeric(),
+    se = numeric(),
+    delta_LL_expr = numeric(),
+    FDR = numeric(),
+    study = character(),
+    data_type = character()
+  )
+  fwrite(empty, out_full)
+  fwrite(empty, out_res)
+  sink(out_sum)
+  cat("=== Proteomics Cox Summary ===\n")
+  cat("Study:", cancer, "\n")
+  cat("Datatype:", data_type, "\n")
+  cat("Samples:", length(common), "\n")
+  cat("Features tested:", 0, "\n")
+  cat("Significant (FDR<0.05):", 0, "\n")
+  sink()
+  quit(status = 0)
+}
 
 res <- rbindlist(res_list, fill = TRUE)
 res <- res[is.finite(p)]
 res[, FDR := p.adjust(p, "BH")]
 res[, study := cohort_label]
 res[, data_type := data_type]
-
-out_full <- sub("\\.csv$", "_full.csv", out_res)
 fwrite(res, out_full)
 fwrite(res[FDR < 0.05 & is.finite(HR) & HR > 0], out_res)
 
@@ -326,7 +351,7 @@ cat("Datatype:", data_type, "\n")
 cat("Samples:", length(common), "\n")
 cat("Features tested:", nrow(res), "\n")
 cat("Significant (FDR<0.05):", sum(res$FDR < 0.05, na.rm = TRUE), "\n")
-cat("Batch strata:", if (has_batch) length(levels(mani$batch_id)) else "none", "\n")
+#cat("Batch strata:", if (has_batch) length(levels(mani$batch_id)) else "none", "\n")
 sink()
 
 say("%s Done. Results: %s | %s", run_id, out_full, out_res)

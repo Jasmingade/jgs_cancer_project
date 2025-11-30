@@ -6,6 +6,7 @@
 suppressPackageStartupMessages({
   library(data.table)
   library(ggplot2)
+  library(grid)
 })
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -18,7 +19,7 @@ norm_root  <- args[[2]]
 batch_root <- args[[3]]
 batch_dir  <- args[[4]]
 out_dir    <- args[[5]]
-target_dataset <- if (length(args) == 6) args[[6]] else NA_character_
+target_dataset <- if (length(args) == 6 && nzchar(args[[6]])) args[[6]] else NA_character_
 
 say <- function(fmt, ...) cat(sprintf(paste0("[plot] ", fmt, "\n"), ...))
 
@@ -133,9 +134,16 @@ batch_gene_dir <- file.path(batch_root, "gene")
 batch_iso_dir  <- file.path(batch_root, "iso_log")
 
 if (!dir.exists(raw_gene_dir)) stop("Missing raw gene directory: ", raw_gene_dir)
+if (!dir.exists(norm_gene_dir)) stop("Missing normalized gene directory: ", norm_gene_dir)
+if (!dir.exists(batch_gene_dir)) stop("Missing batch-corrected gene directory: ", batch_gene_dir)
 
-datasets <- list.files(raw_gene_dir, pattern = "_gene\\.csv$", full.names = FALSE)
-datasets <- sub("_gene\\.csv$", "", datasets)
+raw_datasets <- list.files(raw_gene_dir, pattern = "_gene\\.csv$", full.names = FALSE)
+raw_datasets <- sub("_gene\\.csv$", "", raw_datasets)
+norm_datasets <- list.files(norm_gene_dir, pattern = "_gene\\.csv$", full.names = FALSE)
+norm_datasets <- sub("_gene\\.csv$", "", norm_datasets)
+batch_datasets <- list.files(batch_gene_dir, pattern = "_gene\\.csv$", full.names = FALSE)
+batch_datasets <- sub("_gene\\.csv$", "", batch_datasets)
+datasets <- Reduce(intersect, list(raw_datasets, norm_datasets, batch_datasets))
 datasets <- datasets[!grepl("_reference$", datasets, ignore.case = TRUE)]
 if (!is.na(target_dataset)) {
   datasets <- datasets[datasets == target_dataset]
@@ -238,7 +246,10 @@ for (dataset in sort(datasets)) {
     theme(
       axis.text.x = element_blank(),
       axis.ticks.x = element_blank(),
-      legend.position = "bottom"
+      legend.position = "right",
+      legend.title = element_text(size = 8),
+      legend.text = element_text(size = 7),
+      legend.key.size = unit(0.35, "cm")
     )
 
   out_pdf <- file.path(out_dir, sprintf("%s_preprocess_boxplots.pdf", dataset))

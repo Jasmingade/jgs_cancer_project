@@ -88,7 +88,7 @@ for (dtype in intersect(c("gene","iso_log"), data_types)) {
 
   for (expr_file in sort(files)) {
     dataset_name <- sub(paste0("_", dtype, "\\.csv$"), "", basename(expr_file), ignore.case = TRUE)
-    say("Normalizing dataset %s (%s)", dataset_name, dtype)
+    say("[1/3] Normalizing dataset %s (%s)", dataset_name, dtype)
     expr_dt <- fread(expr_file)
     if (ncol(expr_dt) < 2) {
       warning(sprintf("[norm] %s has <2 columns, skipping", expr_file))
@@ -116,7 +116,7 @@ for (dtype in intersect(c("gene","iso_log"), data_types)) {
       dir.create(frac_dir, recursive = TRUE, showWarnings = FALSE)
       frac_out <- file.path(frac_dir, iso_frac_name(basename(expr_file)))
       fwrite(frac_dt, frac_out)
-      say("Derived iso_frac → %s", frac_out)
+      say("   Derived iso_frac → %s", frac_out)
     }
   }
   say("Completed %s datasets (%d files processed)", dtype, length(files))

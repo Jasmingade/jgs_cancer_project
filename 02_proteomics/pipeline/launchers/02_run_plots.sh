@@ -6,8 +6,11 @@
 #SBATCH --output=02_proteomics/logs/plots/%x-%j.log
 #SBATCH --error=02_proteomics/logs/plots/%x-%j.err
 
-set -euo pipefail
+set -eu pipefail
 source ~/miniconda3/etc/profile.d/conda.sh
+
+conda deactivate || true
+conda deactivate || true
 
 R_ENV="${R_ENV:-/home/people/s184275/r-env}"
 PLOT_DIR="02_proteomics/pipeline/plotting"

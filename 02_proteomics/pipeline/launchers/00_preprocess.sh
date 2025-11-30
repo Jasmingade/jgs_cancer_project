@@ -3,9 +3,9 @@
 #SBATCH --cpus-per-task=6
 #SBATCH --time=01:00:00
 #SBATCH --mem=36G
-#SBATCH --output=02_proteomics/logs/preprocess/preprocess_%a.log
-#SBATCH --error=02_proteomics/logs/preprocess/preprocess_%a.err
-#SBATCH --array=0-40
+#SBATCH --output=02_proteomics/logs/preprocess/preprocess_%A_%a.log
+#SBATCH --error=02_proteomics/logs/preprocess/preprocess_%A_%a.err
+#SBATCH --array=0-14
 
 set -eo pipefail
 
@@ -29,7 +29,7 @@ RUN_SPLIT_CLINICAL=${RUN_SPLIT_CLINICAL:-false}
 RUN_CYCLIC_LOESS=${RUN_CYCLIC_LOESS:-true}
 RUN_RUV_BATCH=${RUN_RUV_BATCH:-true}
 RUN_FILTER_POS_EXPR=${RUN_FILTER_POS_EXPR:-true}
-RUN_PREPROCESS_PLOTS=${RUN_PREPROCESS_PLOTS:-false}
+RUN_PREPROCESS_PLOTS=${RUN_PREPROCESS_PLOTS:-true}
 
 # Splitting clinical
 PROT_CLINICAL_ALL=${PROT_CLINICAL_ALL:-02_proteomics/data/raw/clinical_all_merged.csv}
@@ -103,6 +103,9 @@ echo "PROT_PLOT_RAW_DIR: $PROT_PLOT_RAW_DIR"
 echo "PROT_PLOT_OUT_DIR: $PROT_PLOT_OUT_DIR"
 echo "PROT_STUDY_LIST: $PROT_STUDY_LIST"
 echo "=========================================="
+if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+  echo "SLURM job: $SLURM_JOB_ID (array index=${SLURM_ARRAY_TASK_ID:-none})"
+fi
 
 CURRENT_STUDY=""
 if [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
@@ -121,7 +124,7 @@ if [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
     exit 0
   fi
   CURRENT_STUDY="${STUDY_IDS[$idx]}"
-  echo "[INFO] Selected study for this task: $CURRENT_STUDY"
+  echo "[INFO] Selected study for this task: $CURRENT_STUDY (index ${SLURM_ARRAY_TASK_ID})"
 fi
 
 FILTERED_DATASETS=()
@@ -279,23 +282,30 @@ run_preprocess_plots() {
     echo "[SKIP] Preprocess plotting disabled"
     return 0
   fi
-  if [[ -n "$CURRENT_STUDY" ]]; then
-    echo "[SKIP] Preprocess plotting disabled in per-study mode (CURRENT_STUDY=$CURRENT_STUDY)"
-    return 0
-  fi
   if [[ ! -d "$PROT_FILTER_OUT_DIR" ]]; then
     echo "[ERROR] Plotting requires filtered output dir: $PROT_FILTER_OUT_DIR" >&2
     return 1
   fi
-  echo "[RUN] Preprocess plotting"
   local batch_dir="$PROT_BATCH_ANNOT_DIR"
   mkdir -p "$PROT_PLOT_OUT_DIR"
-  conda run -p "$R_ENV" --no-capture-output Rscript "$script" \
-    "$PROT_PLOT_RAW_DIR" \
-    "$PROT_NORM_OUT_DIR" \
-    "$PROT_BATCH_OUT_DIR" \
-    "$batch_dir" \
-    "$PROT_PLOT_OUT_DIR"
+  if [[ -n "$CURRENT_STUDY" ]]; then
+    echo "[RUN] Preprocess plotting for study $CURRENT_STUDY"
+    conda run -p "$R_ENV" --no-capture-output Rscript "$script" \
+      "$PROT_PLOT_RAW_DIR" \
+      "$PROT_NORM_OUT_DIR" \
+      "$PROT_BATCH_OUT_DIR" \
+      "$batch_dir" \
+      "$PROT_PLOT_OUT_DIR" \
+      "$CURRENT_STUDY"
+  else
+    echo "[RUN] Preprocess plotting for all studies"
+    conda run -p "$R_ENV" --no-capture-output Rscript "$script" \
+      "$PROT_PLOT_RAW_DIR" \
+      "$PROT_NORM_OUT_DIR" \
+      "$PROT_BATCH_OUT_DIR" \
+      "$batch_dir" \
+      "$PROT_PLOT_OUT_DIR"
+  fi
 }
 
 # Add more preprocess steps here as they are implemented
