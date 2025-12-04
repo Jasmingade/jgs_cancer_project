@@ -52,9 +52,54 @@ load_cancer_map <- function(path) {
   cancers
 }
 
+clean_stage <- function(x) {
+  if (is.null(x)) return(NULL)
+  vals <- tolower(trimws(as.character(x)))
+  vals[vals %in% c("", "na", "n/a")] <- NA_character_
+  bad_pat <- "(not available|not applicable|unknown|discrepancy|stage x|i/ii nos)"
+  bad_idx <- grepl(bad_pat, vals, perl = TRUE)
+  bad_idx[is.na(bad_idx)] <- FALSE
+  vals[bad_idx] <- NA_character_
+  out <- rep(NA_character_, length(vals))
+  has <- grepl("(stage\\s*)?(i{1,3}|iv)([abcd])?", vals, perl = TRUE)
+  has[is.na(has)] <- FALSE
+  if (any(has, na.rm = TRUE)) {
+    sub_stage <- sub(".*?(stage\\s*)?(i{1,3}|iv)([abcd])?.*", "\\2", vals[has], perl = TRUE)
+    out[has] <- toupper(sub_stage)
+  }
+  out
+}
+
+clean_sex <- function(x) {
+  if (is.null(x)) return(NULL)
+  vals <- tolower(trimws(as.character(x)))
+  vals[vals %in% c("", "na", "n/a")] <- NA_character_
+  vals[vals %in% c("female", "f")] <- "female"
+  vals[vals %in% c("male", "m")] <- "male"
+  vals
+}
+
 clin <- fread(clinical_path)
 if (!"case_id" %in% names(clin)) stop("clinical_all.csv must contain a case_id column.")
 clin[, case_id := trimws(as.character(case_id))]
+if ("stage" %in% names(clin)) {
+  stage_raw <- clin$stage
+  stage_clean <- clean_stage(stage_raw)
+  if (!is.null(stage_clean)) {
+    clin[, stage := stage_clean]
+    n_clean <- sum(!is.na(stage_raw) & stage_raw != stage_clean, na.rm = TRUE)
+    say("Harmonized stage column (updated %d entries)", n_clean)
+  }
+}
+if ("sex" %in% names(clin)) {
+  sex_raw <- clin$sex
+  sex_clean <- clean_sex(sex_raw)
+  if (!is.null(sex_clean)) {
+    clin[, sex := sex_clean]
+    n_sex_clean <- sum(!is.na(sex_raw) & sex_raw != sex_clean, na.rm = TRUE)
+    say("Harmonized sex column (updated %d entries)", n_sex_clean)
+  }
+}
 
 expr_files <- list.files(expr_dir, pattern = "\\.csv$", full.names = TRUE)
 if (!length(expr_files)) stop("Found no .csv files in ", expr_dir)
@@ -79,6 +124,10 @@ for (expr_file in sort(expr_files)) {
   dataset_name <- sub("_gene\\.csv$", "", basename(expr_file))
   if (dataset_name == basename(expr_file)) {
     say("Skipping %s (expected *_gene.csv)", basename(expr_file))
+    next
+  }
+  if (grepl("_reference$", dataset_name, ignore.case = TRUE)) {
+    say("Skipping %s (reference dataset)", dataset_name)
     next
   }
 

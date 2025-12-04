@@ -1,18 +1,16 @@
 #!/usr/bin/env Rscript
 
 # ============================================================
-# Proteomics univariate CoxPH with batch stratification
+# Proteomics univariate CoxPH
 # ------------------------------------------------------------
 # Mirrors the transcriptomics 03a script but:
 #   * works on proteomics expression matrices
-#   * optionally stratifies by batch (if batch annotation exists)
 #   * collapses duplicate case_ids by averaging replicates
 # Usage:
 #   Rscript 01_univariate_coxph.R \
 #     <expr_matrix.csv> \
 #     <clinical_manifest.csv> \
 #     <covariates.yaml> \
-#     <batch_annotation_dir> \
 #     <out_results.csv> \
 #     <out_summary.txt>
 # ============================================================
@@ -32,16 +30,15 @@ die <- function(...) { message(sprintf(...)); quit(status = 1) }
 # Arguments
 # ============================================================
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 6) {
-  die("Usage: 01_univariate_coxph.R <expr.csv> <clinical.csv> <covariates.yaml> <batch_dir> <out_results.csv> <out_summary.txt>")
+if (length(args) != 5) {
+  die("Usage: 01_univariate_coxph.R <expr.csv> <clinical.csv> <covariates.yaml> <out_results.csv> <out_summary.txt>")
 }
 
 expr_in   <- args[[1]]
 clin_in   <- args[[2]]
 cov_yaml  <- args[[3]]
-batch_dir <- args[[4]]
-out_res   <- args[[5]]
-out_sum   <- args[[6]]
+out_res   <- args[[4]]
+out_sum   <- args[[5]]
 
 dir.create(dirname(out_res), recursive = TRUE, showWarnings = FALSE)
 
@@ -53,6 +50,50 @@ infer_study_name <- function(path) {
   stem <- sub("_(gene|iso_log|iso_frac)$", "", stem, ignore.case = TRUE)
   stem <- sub("_(normal|tumor)$", "", stem, ignore.case = TRUE)
   stem
+}
+
+infer_sample_type <- function(path) {
+  stem <- tools::file_path_sans_ext(basename(path))
+  if (grepl("_reference$", stem, ignore.case = TRUE)) return("reference")
+  "tumor"
+}
+
+parse_thresholds <- function(env_var, default_vals) {
+  raw <- Sys.getenv(env_var, "")
+  if (nzchar(raw)) {
+    vals <- suppressWarnings(as.numeric(strsplit(raw, ",")[[1]]))
+    vals <- vals[is.finite(vals) & vals > 0]
+    vals <- unique(vals)
+    if (length(vals)) return(sort(vals))
+  }
+  sort(unique(default_vals))
+}
+
+format_threshold <- function(x) {
+  sub("0+$", "", sub("(\\.\\d*?)0+$", "\\1", sprintf("%.3f", x)))
+}
+
+FDR_THRESHOLDS <- parse_thresholds("COX_UNIV_FDR_THRESHOLDS", c(0.05, 0.10))
+P_THRESHOLDS <- parse_thresholds("COX_UNIV_P_THRESHOLDS", c(0.05, 0.10))
+
+write_sig_summary <- function(count_fun, thresholds, label) {
+  if (!length(thresholds)) return()
+  for (thr in thresholds) {
+    count <- count_fun(thr)
+    cat(sprintf("Significant (%s<%s): %d\n", label, format_threshold(thr), count))
+  }
+}
+
+build_cohort_label <- function(study, platform, sample_type) {
+  parts <- c(study)
+  if (!is.null(platform) && !is.na(platform) && nzchar(platform)) {
+    parts <- c(parts, platform)
+  }
+  if (!is.null(sample_type) && !is.na(sample_type) && nzchar(sample_type) &&
+      sample_type != "tumor") {
+    parts <- c(parts, sample_type)
+  }
+  paste(parts, collapse = "/")
 }
 
 read_expr_csv <- function(file) {
@@ -84,12 +125,15 @@ combine_matrices <- function(base, add) {
 load_expr_from_file <- function(path) {
   mat <- read_expr_csv(path)
   if (is.null(mat)) die("Failed to read expression matrix: %s", path)
+  sample_type <- infer_sample_type(path)
+  cohort_label <- build_cohort_label(infer_study_name(path), NA_character_, sample_type)
   list(
     expr = mat,
     study = infer_study_name(path),
     platform = NA_character_,
+    sample_type = sample_type,
     data_type = sub("^.*_(gene|iso_log|iso_frac)\\.csv$", "\\1", basename(path)),
-    cohort = infer_study_name(path)
+    cohort = cohort_label
   )
 }
 
@@ -111,7 +155,12 @@ load_expr_from_dir <- function(dir_path) {
   platform <- if (length(platform_vals) == 1) platform_vals else NA_character_
   sample_type_vals <- unique(vapply(rel_parts, function(x) if (length(x) >= 2) x[2] else NA_character_, character(1)))
   sample_type_vals <- sample_type_vals[!is.na(sample_type_vals)]
-  sample_type <- if (length(sample_type_vals) == 1) sample_type_vals else NA_character_
+  sample_type <- if (length(sample_type_vals) == 1) {
+    val <- tolower(sample_type_vals)
+    if (val == "reference") "reference" else "tumor"
+  } else {
+    NA_character_
+  }
   study <- basename(norm_dir)
 
   expr_mat <- NULL
@@ -120,8 +169,7 @@ load_expr_from_dir <- function(dir_path) {
     if (!is.null(mat)) expr_mat <- combine_matrices(expr_mat, mat)
   }
   if (is.null(expr_mat)) die("Failed to assemble expression matrix from %s", dir_path)
-  cohort_parts <- c(study, platform, sample_type)
-  cohort_label <- paste(cohort_parts[!is.na(cohort_parts)], collapse = "/")
+  cohort_label <- build_cohort_label(study, platform, sample_type)
 
   list(
     expr = expr_mat,
@@ -131,25 +179,6 @@ load_expr_from_dir <- function(dir_path) {
     data_type = dtype,
     cohort = cohort_label
   )
-}
-
-find_batch_file <- function(study, batch_dir) {
-  if (!dir.exists(batch_dir)) return(NA_character_)
-  files <- list.files(batch_dir, pattern = "\\.csv$", full.names = TRUE)
-  if (!length(files)) return(NA_character_)
-  bases <- tools::file_path_sans_ext(basename(files))
-  idx <- which(tolower(bases) == tolower(study))
-  if (!length(idx)) return(NA_character_)
-  files[idx[1]]
-}
-
-pick_batch_column <- function(dt) {
-  cols <- intersect(c("Folder_name","Batch","BATCH","batch_id",
-                      "folder_name","folder","run","Run",
-                      "specimen_run","batchname"),
-                    names(dt))
-  if (length(cols)) return(cols[1])
-  NA_character_
 }
 
 collapse_duplicates <- function(mat) {
@@ -166,6 +195,22 @@ collapse_duplicates <- function(mat) {
   agg
 }
 
+# Quantile-normalize a numeric vector to standard normal scores (per feature)
+quantile_normalize_feature <- function(x) {
+  res <- rep(NA_real_, length(x))
+  idx <- which(is.finite(x))
+  if (!length(idx)) return(res)
+  vals <- x[idx]
+  ranks <- rank(vals, ties.method = "average")
+  n <- length(ranks)
+  # map ranks to (0,1) then to z-scores
+  probs <- (ranks - 0.5) / n
+  eps <- 1e-6
+  probs <- pmin(pmax(probs, eps), 1 - eps)
+  res[idx] <- qnorm(probs)
+  res
+}
+
 # ============================================================
 # Load data
 # ============================================================
@@ -177,6 +222,7 @@ cfg  <- yaml::read_yaml(cov_yaml)
 study <- as.character(expr_meta$study)
 platform <- expr_meta$platform
 data_type <- expr_meta$data_type
+sample_type <- if (!is.null(expr_meta$sample_type) && !is.na(expr_meta$sample_type)) expr_meta$sample_type else "tumor"
 cohort_label <- as.character(expr_meta$cohort %||% study)
 cancer_map <- cfg$cancers
 cancer <- if (!is.null(cancer_map) && study %in% names(cancer_map)) as.character(cancer_map[[study]]) else study
@@ -199,46 +245,11 @@ if (!is.null(cfg$stage_levels) && "stage" %in% names(mani)) {
 
 # Align samples
 common <- intersect(colnames(expr), mani$case_id)
-if (length(common) < 10) {
-  die("%s Too few overlapping samples (n=%d)", run_id, length(common))
+if (!length(common)) {
+  die("%s No overlapping samples between expression and clinical data", run_id)
 }
 expr <- expr[, common, drop = FALSE]
 mani <- mani[match(common, mani$case_id)]
-
-# ============================================================
-# Attach batch annotations
-# ============================================================
-#batch_file <- find_batch_file(study, batch_dir)
-#if (is.na(batch_file) && !is.null(platform) && !is.na(platform)) {
-#  batch_file <- find_batch_file(paste(study, platform, sep = "_"), batch_dir)
-#}
-#if (!is.na(batch_file)) {
-#  say("%s Using batch annotation: %s", run_id, batch_file)
-#  batch_dt <- fread(batch_file)
-#  colnames(batch_dt) <- tolower(colnames(batch_dt))
-#  batch_col <- pick_batch_column(batch_dt)
-#  if (!is.na(batch_col) && "case_id" %in% names(batch_dt)) {
-#    mani <- merge(
-#      mani,
-#      batch_dt[, .(case_id, batch_id = get(batch_col))],
-#      by = "case_id",
-#      all.x = TRUE,
-#      suffixes = c("", "_batch")
-#    )
-#  } else {
-#    say("%s [WARN] batch column not found in %s", run_id, batch_file)
-#  }
-#} else {
-#  say("%s [INFO] No batch annotation found for %s", run_id, study)
-#}
-
-#has_batch <- "batch_id" %in% names(mani) &&
-#  sum(!is.na(mani$batch_id)) >= 2 &&
-#  length(unique(na.omit(mani$batch_id))) > 1
-#if (has_batch) {
-#  mani[, batch_id := factor(batch_id)]
-#  say("%s Stratifying by batch (%d levels)", run_id, length(levels(mani$batch_id)))
-#}
 
 y <- with(mani, Surv(OS_time, OS_event))
 
@@ -266,7 +277,6 @@ say("%s Covariates used: %s", run_id,
 # ============================================================
 rhs_terms <- c("expr")
 if (ncol(Xcov)) rhs_terms <- c(rhs_terms, names(Xcov))
-#if (has_batch) rhs_terms <- c(rhs_terms, "strata(batch_id)")
 fml <- as.formula(paste("y ~", paste(rhs_terms, collapse = " + ")))
 say("%s Cox formula: %s", run_id, deparse(fml))
 
@@ -279,10 +289,11 @@ idx <- seq_len(nrow(expr))
 res_list <- mclapply(idx, function(i) {
   tryCatch({
     vals <- as.numeric(expr[i, ])
-    if (all(is.na(vals)) || sd(vals, na.rm = TRUE) == 0) return(data.frame())
-    vals_z <- as.numeric(scale(vals))
-    df <- data.frame(expr = vals_z, Xcov)
-    if (has_batch) df$batch_id <- mani$batch_id
+    finite_vals <- vals[is.finite(vals)]
+    if (length(finite_vals) < 2 || sd(finite_vals, na.rm = TRUE) == 0) return(data.frame())
+    vals_qn <- quantile_normalize_feature(vals)
+    if (!any(is.finite(vals_qn))) return(data.frame())
+    df <- data.frame(expr = vals_qn, Xcov)
     df$y <- y
 
     fit <- suppressWarnings(coxph(fml, data = df, ties = "efron"))
@@ -331,7 +342,8 @@ if (!length(res_list)) {
   cat("Datatype:", data_type, "\n")
   cat("Samples:", length(common), "\n")
   cat("Features tested:", 0, "\n")
-  cat("Significant (FDR<0.05):", 0, "\n")
+  write_sig_summary(function(thr) 0, FDR_THRESHOLDS, "FDR")
+  write_sig_summary(function(thr) 0, P_THRESHOLDS, "p")
   sink()
   quit(status = 0)
 }
@@ -341,8 +353,16 @@ res <- res[is.finite(p)]
 res[, FDR := p.adjust(p, "BH")]
 res[, study := cohort_label]
 res[, data_type := data_type]
+res[, sample_type := sample_type]
 fwrite(res, out_full)
-fwrite(res[FDR < 0.05 & is.finite(HR) & HR > 0], out_res)
+top_features <- res[FDR < 0.05 & is.finite(HR) & HR > 0 & !is.na(HR)]
+if (!nrow(top_features)) {
+  fallback <- res[is.finite(HR) & !is.na(HR)]
+  fallback <- fallback[order(FDR, na.last = TRUE)]
+  fallback <- fallback[is.finite(FDR)]
+  top_features <- fallback[seq_len(min(100L, nrow(fallback)))]
+}
+fwrite(top_features, out_res)
 
 sink(out_sum)
 cat("=== Proteomics Cox Summary ===\n")
@@ -350,8 +370,8 @@ cat("Study:", cancer, "\n")
 cat("Datatype:", data_type, "\n")
 cat("Samples:", length(common), "\n")
 cat("Features tested:", nrow(res), "\n")
-cat("Significant (FDR<0.05):", sum(res$FDR < 0.05, na.rm = TRUE), "\n")
-#cat("Batch strata:", if (has_batch) length(levels(mani$batch_id)) else "none", "\n")
+write_sig_summary(function(thr) sum(res$FDR < thr, na.rm = TRUE), FDR_THRESHOLDS, "FDR")
+write_sig_summary(function(thr) sum(res$p < thr, na.rm = TRUE), P_THRESHOLDS, "p")
 sink()
 
 say("%s Done. Results: %s | %s", run_id, out_full, out_res)

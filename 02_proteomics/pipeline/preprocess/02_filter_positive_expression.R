@@ -31,8 +31,40 @@ dtypes <- unique(trimws(strsplit(dtype_arg, ",")[[1]]))
 dtypes <- dtypes[nzchar(dtypes)]
 if (!length(dtypes)) stop("No datatypes specified.")
 
+map_file <- Sys.getenv("PROT_ENST_ENSG_MAP", "02_proteomics/data/raw/ENST-ENSG_mapping.csv")
+load_mapping <- function(path) {
+  if (!file.exists(path)) stop("[filter] ENST-ENSG mapping not found: ", path)
+  dt <- fread(path, header = FALSE, col.names = c("transcript_id", "gene_id"))
+  dt[, transcript_id := trimws(transcript_id)]
+  dt[, gene_id := trimws(gene_id)]
+  dt <- dt[nzchar(transcript_id) & nzchar(gene_id)]
+  dt
+}
+mapping_dt <- load_mapping(map_file)
+
+iso_frac_from_iso_log <- function(mat, mapping_dt) {
+  if (is.null(mat) || !nrow(mat) || !ncol(mat)) return(NULL)
+  tx <- rownames(mat)
+  gene_map <- mapping_dt$gene_id[match(tx, mapping_dt$transcript_id)]
+  keep <- !is.na(gene_map)
+  if (!any(keep)) return(NULL)
+  mat <- mat[keep, , drop = FALSE]
+  gene_map <- gene_map[keep]
+  res <- mat
+  genes <- unique(gene_map)
+  for (g in genes) {
+    idx <- which(gene_map == g)
+    sub <- mat[idx, , drop = FALSE]
+    denom <- colSums(sub, na.rm = TRUE)
+    frac <- sweep(sub, 2, denom, "/")
+    frac[, denom == 0] <- NA_real_
+    res[idx, ] <- frac
+  }
+  res
+}
+
 clinical_dir <- if (length(args) >= 5) args[[5]] else NA_character_
-target_dataset <- if (length(args) == 6) args[[6]] else NA_character_
+target_prefix <- if (length(args) == 6 && nzchar(args[[6]])) args[[6]] else NA_character_
 
 if (!dir.exists(input_root)) stop("Input root not found: ", input_root)
 dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
@@ -51,8 +83,24 @@ iso_frac_name <- function(base_name) {
   }
 }
 
+canonical_dataset_name <- function(x) {
+  if (is.null(x) || is.na(x) || !nzchar(x)) return(x)
+  if (grepl("_reference$", x, ignore.case = TRUE)) return(x)
+  sub("_(normal|tumor)$", "", x, ignore.case = TRUE)
+}
+
 dataset_id_from_file <- function(path, dtype) {
-  sub(paste0("_", dtype, "\\.csv$"), "", basename(path), ignore.case = TRUE)
+  base <- sub(paste0("_", dtype, "\\.csv$"), "", basename(path), ignore.case = TRUE)
+  canonical_dataset_name(base)
+}
+
+canonical_rel_path <- function(rel_path, dtype) {
+  rel_dir <- dirname(rel_path)
+  if (rel_dir == ".") rel_dir <- ""
+  base <- basename(rel_path)
+  dataset_base <- sub(paste0("_", dtype, "\\.csv$"), "", base, ignore.case = TRUE)
+  dataset_name <- canonical_dataset_name(dataset_base)
+  file.path(rel_dir, sprintf("%s_%s.csv", dataset_name, dtype))
 }
 
 for (dtype in dtypes) {
@@ -66,11 +114,31 @@ for (dtype in dtypes) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
   files <- list.files(in_dir, pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
-  if (!is.na(target_dataset)) {
-    files <- Filter(function(f) dataset_id_from_file(f, dtype) == target_dataset, files)
+  if (!is.na(target_prefix)) {
+    files <- Filter(function(f) {
+      ds <- dataset_id_from_file(f, dtype)
+      startsWith(ds, target_prefix)
+    }, files)
   }
   if (!length(files)) {
     say("No CSVs found for %s in %s", dtype, in_dir)
+    next
+  }
+
+  ref_count <- 0L
+  files <- Filter(function(f) {
+    ds <- dataset_id_from_file(f, dtype)
+    if (grepl("_reference$", ds, ignore.case = TRUE)) {
+      ref_count <<- ref_count + 1L
+      return(FALSE)
+    }
+    TRUE
+  }, files)
+  if (ref_count > 0L) {
+    say("Skipped %d %s reference file(s)", ref_count, dtype)
+  }
+  if (!length(files)) {
+    say("No non-reference CSVs found for %s in %s", dtype, in_dir)
     next
   }
 
@@ -90,20 +158,29 @@ for (dtype in dtypes) {
 
     if (!total_features) {
       say("%s contains 0 features; copying as-is", expr_file)
-      rel_path <- sub(paste0("^", norm_in_dir, "/?"), "", normalizePath(expr_file, winslash = "/", mustWork = TRUE))
+      rel_path_raw <- sub(paste0("^", norm_in_dir, "/?"), "", normalizePath(expr_file, winslash = "/", mustWork = TRUE))
+      rel_path <- canonical_rel_path(rel_path_raw, dtype)
       out_file <- file.path(out_dir, rel_path)
       dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)
       fwrite(expr_dt, out_file)
       next
     }
 
+    rel_path_raw <- sub(paste0("^", norm_in_dir, "/?"), "", normalizePath(expr_file, winslash = "/", mustWork = TRUE))
+    rel_path <- canonical_rel_path(rel_path_raw, dtype)
+
     prop_pos <- rowMeans(expr_mat > 0, na.rm = TRUE)
     prop_pos[is.na(prop_pos)] <- 0
     keep_idx <- prop_pos > min_prop
     kept <- sum(keep_idx)
+    if (kept == 0) {
+      say("No features passed filter for %s (dtype=%s, min_prop=%.2f) → keeping all features",
+          rel_path, dtype, min_prop)
+      keep_idx <- rep(TRUE, total_features)
+      kept <- total_features
+    }
 
-    rel_path <- sub(paste0("^", norm_in_dir, "/?"), "", normalizePath(expr_file, winslash = "/", mustWork = TRUE))
-    dataset_name <- gsub("\\.csv$", "", rel_path)
+    dataset_name <- canonical_dataset_name(sub("\\.csv$", "", rel_path))
     out_file <- file.path(out_dir, rel_path)
     dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)
 
@@ -122,23 +199,27 @@ for (dtype in dtypes) {
     )
 
     if (dtype == "iso_log" && kept > 0) {
-      eps <- 1e-6
       frac_mat <- as.matrix(filtered_dt[, -1, with = FALSE])
       storage.mode(frac_mat) <- "double"
-      frac_mat <- plogis(frac_mat)
-      frac_mat <- pmin(pmax(frac_mat, eps), 1 - eps)
-      frac_dt <- cbind(
-        filtered_dt[, .SD, .SDcols = feature_col],
-        as.data.table(frac_mat)
-      )
-      setnames(frac_dt, c(feature_col, colnames(frac_mat)))
-      frac_dirname <- dirname(rel_path)
-      if (frac_dirname == ".") frac_dirname <- ""
-      frac_rel <- file.path(frac_dirname, iso_frac_name(basename(rel_path)))
-      frac_out <- file.path(output_root, "iso_frac", frac_rel)
-      dir.create(dirname(frac_out), recursive = TRUE, showWarnings = FALSE)
-      fwrite(frac_dt, frac_out)
-      say("Derived iso_frac from filtered %s → %s", rel_path, frac_out)
+      rownames(frac_mat) <- filtered_dt[[feature_col]]
+      # invert log2(+1) from upstream and compute fractions
+      lin <- pmax(2^frac_mat - 1, 0)
+      frac_mat <- iso_frac_from_iso_log(lin, mapping_dt)
+      if (is.null(frac_mat)) {
+        warning(sprintf("[filter] Could not derive iso_frac for %s (no transcript->gene mapping)", rel_path))
+      } else {
+        frac_dt <- cbind(
+          data.table(feature = rownames(frac_mat)),
+          as.data.table(frac_mat)
+        )
+        frac_dirname <- dirname(rel_path)
+        if (frac_dirname == ".") frac_dirname <- ""
+        frac_rel <- file.path(frac_dirname, iso_frac_name(basename(rel_path)))
+        frac_out <- file.path(output_root, "iso_frac", frac_rel)
+        dir.create(dirname(frac_out), recursive = TRUE, showWarnings = FALSE)
+        fwrite(frac_dt, frac_out)
+        say("Derived iso_frac from filtered %s → %s", rel_path, frac_out)
+      }
     }
   }
 }
@@ -185,8 +266,7 @@ if (length(summary_rows)) {
     theme_bw(base_size = 11) +
     theme(legend.position = "bottom")
   ggsave(file.path(plot_dir, "feature_retention_barplot.pdf"), retain_plot, width = 10, height = 6, units = "in")
-  ggsave(file.path(plot_dir, "feature_retention_barplot.png"), retain_plot, width = 10, height = 6, units = "in", dpi = 300)
-  say("Saved retention plot to %s/feature_retention_barplot.(pdf|png)", plot_dir)
+  say("Saved retention plot to %s/feature_retention_barplot.pdf", plot_dir)
 } else {
   say("No datasets were filtered.")
 }

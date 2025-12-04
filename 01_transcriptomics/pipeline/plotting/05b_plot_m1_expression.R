@@ -305,7 +305,7 @@ p <- ggplot(
   aes(x = cancer, y = logHR,
       color = data_type,
       group = interaction(cancer, data_type))
-) +
+  ) +
   geom_boxplot(
     fill = "white",
     outlier.shape = NA,

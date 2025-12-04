@@ -55,6 +55,38 @@ build_dt <- function(mat) {
   dt
 }
 
+map_file <- Sys.getenv("PROT_ENST_ENSG_MAP", "02_proteomics/data/raw/ENST-ENSG_mapping.csv")
+load_mapping <- function(path) {
+  if (!file.exists(path)) stop("[norm] ENST-ENSG mapping not found: ", path)
+  dt <- fread(path, header = FALSE, col.names = c("transcript_id", "gene_id"))
+  dt[, transcript_id := trimws(transcript_id)]
+  dt[, gene_id := trimws(gene_id)]
+  dt <- dt[nzchar(transcript_id) & nzchar(gene_id)]
+  dt
+}
+mapping_dt <- load_mapping(map_file)
+
+iso_frac_from_iso_log <- function(mat, mapping_dt) {
+  if (is.null(mat) || !nrow(mat) || !ncol(mat)) return(NULL)
+  tx <- rownames(mat)
+  gene_map <- mapping_dt$gene_id[match(tx, mapping_dt$transcript_id)]
+  keep <- !is.na(gene_map)
+  if (!any(keep)) return(NULL)
+  mat <- mat[keep, , drop = FALSE]
+  gene_map <- gene_map[keep]
+  res <- mat
+  genes <- unique(gene_map)
+  for (g in genes) {
+    idx <- which(gene_map == g)
+    sub <- mat[idx, , drop = FALSE]
+    denom <- colSums(sub, na.rm = TRUE)
+    frac <- sweep(sub, 2, denom, "/")
+    frac[, denom == 0] <- NA_real_
+    res[idx, ] <- frac
+  }
+  res
+}
+
 iso_frac_name <- function(base_name) {
   if (grepl("_iso_log(\\.csv)?$", base_name, ignore.case = TRUE)) {
     sub("_iso_log(\\.csv)?$", "_iso_frac.csv", base_name, ignore.case = TRUE)
@@ -63,6 +95,18 @@ iso_frac_name <- function(base_name) {
   } else {
     sub("\\.csv$", "_iso_frac.csv", base_name, ignore.case = TRUE)
   }
+}
+
+canonical_dataset_name <- function(x) {
+  if (is.null(x) || is.na(x) || !nzchar(x)) return(x)
+  if (grepl("_reference$", x, ignore.case = TRUE)) return(x)
+  sub("_(normal|tumor)$", "", x, ignore.case = TRUE)
+}
+
+matches_target <- function(base_name, target) {
+  if (is.na(target) || !nzchar(target)) return(TRUE)
+  canon <- canonical_dataset_name(base_name)
+  target %in% c(base_name, canon)
 }
 
 for (dtype in intersect(c("gene","iso_log"), data_types)) {
@@ -74,7 +118,10 @@ for (dtype in intersect(c("gene","iso_log"), data_types)) {
 
   files <- list.files(base_dir, pattern = paste0(dtype, "\\.csv$"), full.names = TRUE, recursive = FALSE)
   if (!is.na(target_dataset)) {
-    files <- files[sub(paste0("_", dtype, "\\.csv$"), "", basename(files), ignore.case = TRUE) == target_dataset]
+    files <- Filter(function(f) {
+      base <- sub(paste0("_", dtype, "\\.csv$"), "", basename(f), ignore.case = TRUE)
+      matches_target(base, target_dataset)
+    }, files)
   }
   if (!length(files)) {
     warning(sprintf("[norm] No %s CSV files selected under %s", dtype, base_dir))
@@ -87,7 +134,8 @@ for (dtype in intersect(c("gene","iso_log"), data_types)) {
   dir.create(dtype_out_dir, recursive = TRUE, showWarnings = FALSE)
 
   for (expr_file in sort(files)) {
-    dataset_name <- sub(paste0("_", dtype, "\\.csv$"), "", basename(expr_file), ignore.case = TRUE)
+    dataset_base <- sub(paste0("_", dtype, "\\.csv$"), "", basename(expr_file), ignore.case = TRUE)
+    dataset_name <- canonical_dataset_name(dataset_base)
     say("[1/3] Normalizing dataset %s (%s)", dataset_name, dtype)
     expr_dt <- fread(expr_file)
     if (ncol(expr_dt) < 2) {
@@ -103,20 +151,26 @@ for (dtype in intersect(c("gene","iso_log"), data_types)) {
     if (is.null(norm_mat)) next
 
     norm_dt <- build_dt(norm_mat)
-    out_file <- file.path(dtype_out_dir, basename(expr_file))
+    out_name <- sprintf("%s_%s.csv", dataset_name, dtype)
+    out_file <- file.path(dtype_out_dir, out_name)
     fwrite(norm_dt, out_file)
     say("Wrote %s normalized → %s", dtype, out_file)
 
     if (dtype == "iso_log") {
-      eps <- 1e-6
-      frac_mat <- plogis(norm_mat)
-      frac_mat <- pmin(pmax(frac_mat, eps), 1 - eps)
-      frac_dt <- build_dt(frac_mat)
-      frac_dir <- file.path(out_root, "iso_frac")
-      dir.create(frac_dir, recursive = TRUE, showWarnings = FALSE)
-      frac_out <- file.path(frac_dir, iso_frac_name(basename(expr_file)))
-      fwrite(frac_dt, frac_out)
-      say("   Derived iso_frac → %s", frac_out)
+      eps <- 1e-12
+      lin <- pmax(2^norm_mat - 1, 0)  # invert log2(+1)
+      frac_mat <- iso_frac_from_iso_log(lin, mapping_dt)
+      if (is.null(frac_mat)) {
+        warning(sprintf("[norm] Could not derive iso_frac for %s (no transcript->gene mapping)", dataset_name))
+      } else {
+        frac_mat <- pmin(pmax(frac_mat, eps), 1 - eps)
+        frac_dt <- build_dt(frac_mat)
+        frac_dir <- file.path(out_root, "iso_frac")
+        dir.create(frac_dir, recursive = TRUE, showWarnings = FALSE)
+        frac_out <- file.path(frac_dir, iso_frac_name(out_name))
+        fwrite(frac_dt, frac_out)
+        say("   Derived iso_frac → %s", frac_out)
+      }
     }
   }
   say("Completed %s datasets (%d files processed)", dtype, length(files))

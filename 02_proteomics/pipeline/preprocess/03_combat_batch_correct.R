@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-# Perform RUV-based batch correction per study/platform/sample_type using the
+# Perform ComBat-based batch correction per study/platform/sample_type using the
 # combined per-study CSV layout:
 #   <input_root>/<dtype>/<dataset_id>_<dtype>.csv
 # The corrected matrices are written to:
@@ -10,31 +10,29 @@
 suppressPackageStartupMessages({
   library(data.table)
 })
-if (!requireNamespace("ruv", quietly = TRUE)) {
-  stop("Package 'ruv' is required. Install via install.packages('ruv').")
+if (!requireNamespace("sva", quietly = TRUE)) {
+  stop("Package 'sva' is required. Install via install.packages('sva').")
 }
 
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) < 3 || length(args) > 6) {
-  stop("Usage: 03_ruv_batch_correct.R <input_root> <output_root> <k> [comma_separated_dtypes] [target_dataset] [batch_annotation_dir]")
+if (length(args) < 2 || length(args) > 5) {
+  stop("Usage: 03_combat_batch_correct.R <input_root> <output_root> [comma_separated_dtypes] [target_dataset] [batch_annotation_dir]")
 }
 
 input_root <- args[[1]]
 output_root <- args[[2]]
-k <- as.integer(args[[3]])
-if (is.na(k) || k < 1) stop("k must be a positive integer.")
-dtype_arg <- if (length(args) >= 4) args[[4]] else "gene,iso_log"
-target_dataset <- if (length(args) >= 5) args[[5]] else NA_character_
-batch_dir <- if (length(args) == 6) args[[6]] else "02_proteomics/data/batch_annotation"
+dtype_arg <- if (length(args) >= 3) args[[3]] else "gene,iso_log"
+target_dataset <- if (length(args) >= 4) args[[4]] else NA_character_
+batch_dir <- if (length(args) == 5) args[[5]] else "02_proteomics/data/batch_annotation"
 
 dtypes <- unique(trimws(strsplit(dtype_arg, ",")[[1]]))
 dtypes <- dtypes[nzchar(dtypes)]
 if (!length(dtypes)) stop("No dtypes specified.")
 
-# Mapping for isoform fractions
+# Mapping for iso_frac derivation
 map_file <- Sys.getenv("PROT_ENST_ENSG_MAP", "02_proteomics/data/raw/ENST-ENSG_mapping.csv")
 load_mapping <- function(path) {
-  if (!file.exists(path)) stop("[ruv] ENST-ENSG mapping not found: ", path)
+  if (!file.exists(path)) stop("[combat] ENST-ENSG mapping not found: ", path)
   dt <- fread(path, header = FALSE, col.names = c("transcript_id", "gene_id"))
   dt[, transcript_id := trimws(transcript_id)]
   dt[, gene_id := trimws(gene_id)]
@@ -51,12 +49,11 @@ iso_frac_from_iso_log <- function(mat, mapping_dt) {
   if (!any(keep)) return(NULL)
   mat <- mat[keep, , drop = FALSE]
   gene_map <- gene_map[keep]
-  lin <- 2^mat
-  res <- lin
+  res <- mat
   genes <- unique(gene_map)
   for (g in genes) {
     idx <- which(gene_map == g)
-    sub <- lin[idx, , drop = FALSE]
+    sub <- mat[idx, , drop = FALSE]
     denom <- colSums(sub, na.rm = TRUE)
     frac <- sweep(sub, 2, denom, "/")
     frac[, denom == 0] <- NA_real_
@@ -68,7 +65,7 @@ iso_frac_from_iso_log <- function(mat, mapping_dt) {
 if (!dir.exists(input_root)) stop("Input root not found: ", input_root)
 dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
 
-say <- function(fmt, ...) cat(sprintf(paste0("[ruv] ", fmt, "\n"), ...))
+say <- function(fmt, ...) cat(sprintf(paste0("[combat] ", fmt, "\n"), ...))
 
 canonical_dataset_name <- function(x) {
   if (is.null(x) || is.na(x) || !nzchar(x)) return(x)
@@ -78,12 +75,6 @@ canonical_dataset_name <- function(x) {
 
 is_reference_dataset <- function(x) {
   !is.null(x) && isTRUE(grepl("_reference$", x, ignore.case = TRUE))
-}
-
-target_match_values <- if (!is.na(target_dataset) && nzchar(target_dataset)) {
-  unique(na.omit(c(target_dataset, canonical_dataset_name(target_dataset))))
-} else {
-  character()
 }
 
 canonicalize_single <- function(val) {
@@ -181,6 +172,12 @@ reference_candidates <- function(file, dtype) {
   unique(cand)
 }
 
+target_match_values <- if (!is.na(target_dataset) && nzchar(target_dataset)) {
+  unique(na.omit(c(target_dataset, canonical_dataset_name(target_dataset))))
+} else {
+  character()
+}
+
 align_to <- function(mat, target_feats) {
   if (is.null(mat)) return(NULL)
   feat <- rownames(mat)
@@ -206,7 +203,7 @@ process_file <- function(file, dtype) {
   dataset <- dataset_id(file, dtype)
   dataset_type <- infer_sample_type(dataset)
 
-  say("Starting batch correction prep for %s (%s)", dataset, dtype)
+  say("Starting ComBat batch correction prep for %s (%s)", dataset, dtype)
   ref_paths <- reference_candidates(file, dtype)
   existing_refs <- ref_paths[file.exists(ref_paths)]
   ref_file <- if (length(existing_refs)) existing_refs[1] else NA_character_
@@ -232,11 +229,12 @@ process_file <- function(file, dtype) {
   full_mat <- if (has_reference) cbind(mat, ref_mat) else mat
   is_reference <- c(rep(FALSE, ncol(mat)), if (has_reference) rep(TRUE, ncol(ref_mat)) else logical())
   sample_names <- colnames(full_mat)
+
+  # batches from annotation
   study_key <- sub("_(normal|tumor|reference)$", "", dataset, ignore.case = TRUE)
   case_batches <- load_case_batches(study_key)
   study_case_ids <- toupper(colnames(mat))
   study_batches <- rep(NA_character_, length(study_case_ids))
-  study_cases_matched <- 0L
   if (!is.null(case_batches)) {
     dt_sub <- case_batches
     if (!is.na(dataset_type) && "sample_type" %in% names(case_batches)) {
@@ -245,80 +243,46 @@ process_file <- function(file, dtype) {
     }
     idx <- match(study_case_ids, dt_sub$case_id)
     study_batches <- dt_sub$batch_id[idx]
-    if (anyNA(study_batches) && !is.null(case_batches)) {
-      missing_idx <- which(is.na(study_batches))
-      if (length(missing_idx)) {
-        fallback <- match(study_case_ids[missing_idx], case_batches$case_id)
-        study_batches[missing_idx] <- case_batches$batch_id[fallback]
-      }
-    }
-    study_cases_matched <- sum(!is.na(study_batches))
   } else {
     say("Dataset %s has no batch annotation file for %s", dataset, study_key)
   }
   ref_batches <- if (has_reference) reference_batch_labels(colnames(ref_mat)) else character()
-  replicate_labels <- c(study_batches, ref_batches)
-  fallback_labels <- sample_names
-  if (has_reference) fallback_labels[is_reference] <- paste0("reference_", dataset)
-  if (all(is.na(replicate_labels))) {
-    replicate_labels <- fallback_labels
+  batch_vec <- c(study_batches, ref_batches)
+  # fallback batch labels for missing ones (each its own batch)
+  if (all(is.na(batch_vec))) {
+    batch_vec <- paste0("batch_", seq_along(sample_names))
   } else {
-    replicate_labels[is.na(replicate_labels)] <- fallback_labels[is.na(replicate_labels)]
-    dup_tmp <- table(replicate_labels)
-    if (!any(dup_tmp >= 2)) {
-      say("Dataset %s replicate labels from batches have no duplicates; falling back to reference grouping", dataset)
-      replicate_labels <- fallback_labels
-    }
+    missing <- is.na(batch_vec) | !nzchar(batch_vec)
+    if (any(missing)) batch_vec[missing] <- paste0("batch_", seq_along(sample_names))[missing]
   }
-  say("Dataset %s (%s) samples=%d (batches assigned=%d) refs=%d unique_replicates=%d",
-      dataset, dtype, ncol(mat), study_cases_matched, ref_cols, length(unique(replicate_labels)))
 
-  corrected <- mat
-  if (ncol(full_mat) < 2) {
-    say("Dataset %s has <2 samples; copying input", dataset)
+  unique_batches <- unique(batch_vec)
+  if (length(unique_batches) < 2) {
+    say("Dataset %s (%s) has <2 batches; copying input", dataset, dtype)
+    corrected <- mat
   } else {
-    full_mat[is.na(full_mat)] <- 0
-    var_source <- if (has_reference && sum(is_reference) >= 2) {
-      say("Dataset %s using reference-derived controls", dataset)
-      ref_idx <- which(is_reference)
-      apply(full_mat[, ref_idx, drop = FALSE], 1, var, na.rm = TRUE)
+    say("Dataset %s (%s) batches: %s", dataset, dtype, paste(unique_batches, collapse = ","))
+    # simple per-feature median imputation for NAs
+    full_mat_imp <- apply(full_mat, 1, function(row) {
+      if (all(!is.finite(row))) return(rep(0, length(row)))
+      m <- safe_median(row)
+      row[!is.finite(row)] <- m
+      row
+    })
+    full_mat_imp <- t(full_mat_imp)
+    combat_res <- sva::ComBat(dat = full_mat_imp, 
+                              batch = batch_vec, 
+                              par.prior = TRUE, 
+                              prior.plots = FALSE)
+    corrected_full <- combat_res[, !is_reference, drop = FALSE]
+    rownames(corrected_full) <- rownames(full_mat_imp)
+    if (all(!is.finite(corrected_full))) {
+      say("Dataset %s (%s) ComBat returned all non-finite values → keeping uncorrected input",
+          dataset, dtype)
+      corrected <- mat
     } else {
-      if (!has_reference) {
-        say("Dataset %s lacks reference columns; using fallback controls", dataset)
-      } else if (sum(is_reference) < 2) {
-        say("Dataset %s has only one reference column; using fallback controls", dataset)
-      }
-      apply(full_mat, 1, var, na.rm = TRUE)
-    }
-    control_order <- order(var_source, decreasing = FALSE)
-    control_idx <- control_order[seq_len(min(length(control_order), 500))]
-    control_idx <- control_idx[control_idx > 0 & !is.na(control_idx)]
-
-    dup_sizes <- table(replicate_labels)
-    max_rep_size <- if (length(dup_sizes)) max(dup_sizes) else 1
-
-    if (!length(control_idx)) {
-      say("Dataset %s lacks control features; copying input", dataset)
-    } else if (max_rep_size < 2) {
-      say("Dataset %s has no replicate groups (unique=%d); skipping RUVIII adjustment", dataset, length(dup_sizes))
-    } else {
-      k_use <- min(k, length(control_idx))
-      if (k_use < 1) {
-        say("Dataset %s insufficient controls for k=%d; copying input", dataset, k)
-      } else {
-        Y <- t(full_mat)
-        ctl_vec <- control_idx
-        M <- ruv::replicate.matrix(replicate_labels)
-        fit <- ruv::RUVIII(Y = Y, M = M, ctl = ctl_vec, k = k_use, return.info = TRUE)
-        adj <- if (is.list(fit)) fit$newY else fit
-        corrected_full <- t(adj)
-        rownames(corrected_full) <- rownames(full_mat)
-        corrected <- corrected_full[, !is_reference, drop = FALSE]
-        say("Dataset %s (%s) corrected with k=%d via RUVIII (%s replicates)",
-            dataset, dtype, k_use,
-            if (has_reference && sum(is_reference) >= 2) "reference" else "sample duplicates")
-        say("Dataset %s (%s) batch correction completed successfully", dataset, dtype)
-      }
+      corrected <- corrected_full
+      say("Dataset %s (%s) batch correction completed via ComBat", dataset, dtype)
     }
   }
 
@@ -335,7 +299,7 @@ process_file <- function(file, dtype) {
     lin <- pmax(2^corrected - 1, 0)  # invert log2(+1)
     frac_mat <- iso_frac_from_iso_log(lin, mapping_dt)
     if (is.null(frac_mat)) {
-      warning(sprintf("[ruv] Could not derive iso_frac for %s (no transcript->gene mapping)", dataset))
+      warning(sprintf("[combat] Could not derive iso_frac for %s (no transcript->gene mapping)", dataset))
     } else {
       frac_mat <- pmin(pmax(frac_mat, eps), 1 - eps)
       frac_dt <- data.table(feature = rownames(frac_mat))

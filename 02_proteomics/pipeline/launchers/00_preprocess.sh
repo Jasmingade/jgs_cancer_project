@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=02_pre
-#SBATCH --cpus-per-task=6
-#SBATCH --time=01:00:00
+#SBATCH --cpus-per-task=4
+#SBATCH --time=02:00:00
 #SBATCH --mem=36G
 #SBATCH --output=02_proteomics/logs/preprocess/preprocess_%A_%a.log
 #SBATCH --error=02_proteomics/logs/preprocess/preprocess_%A_%a.err
-#SBATCH --array=0-14
+#SBATCH --array=1-1
 
 set -eo pipefail
 
@@ -23,13 +23,15 @@ R_ENV="${R_ENV:-/home/people/s184275/r-env}"
 PREPROCESS_DIR="02_proteomics/pipeline/preprocess"
 LOGDIR="02_proteomics/logs/preprocess"
 PROT_STUDY_LIST="${PROT_STUDY_LIST:-02_proteomics/data/raw/study_list.txt}"
+PROT_ENST_ENSG_MAP="${PROT_ENST_ENSG_MAP:-02_proteomics/data/raw/ENST-ENSG_mapping.csv}"
 
 # Toggle scripts
 RUN_SPLIT_CLINICAL=${RUN_SPLIT_CLINICAL:-false}
+RUN_LOG_TRANSFORM=${RUN_LOG_TRANSFORM:-true}
 RUN_CYCLIC_LOESS=${RUN_CYCLIC_LOESS:-true}
 RUN_RUV_BATCH=${RUN_RUV_BATCH:-true}
 RUN_FILTER_POS_EXPR=${RUN_FILTER_POS_EXPR:-true}
-RUN_PREPROCESS_PLOTS=${RUN_PREPROCESS_PLOTS:-true}
+RUN_PREPROCESS_PLOTS=${RUN_PREPROCESS_PLOTS:-false}
 
 # Splitting clinical
 PROT_CLINICAL_ALL=${PROT_CLINICAL_ALL:-02_proteomics/data/raw/clinical_all_merged.csv}
@@ -37,27 +39,45 @@ PROT_GENE_DIR=${PROT_GENE_DIR:-02_proteomics/data/gene}
 PROT_CLINICAL_DIR=${PROT_CLINICAL_DIR:-02_proteomics/data/clinical}
 PROT_CANCER_CONFIG=${PROT_CANCER_CONFIG:-02_proteomics/config/cancers.yaml}
 
+# Log transform
+PROT_LOG_IN_DIR=${PROT_LOG_IN_DIR:-02_proteomics/data}
+PROT_LOG_OUT_DIR=${PROT_LOG_OUT_DIR:-02_proteomics/out/preprocessed/log_transform}
+PROT_LOG_DATATYPES=${PROT_LOG_DATATYPES:-gene,iso_log}
+
 # Normalization
-PROT_NORM_DATA_ROOT=${PROT_NORM_DATA_ROOT:-02_proteomics/data}
+PROT_NORM_DATA_ROOT=${PROT_NORM_DATA_ROOT:-$PROT_LOG_OUT_DIR}
 PROT_NORM_OUT_DIR=${PROT_NORM_OUT_DIR:-02_proteomics/out/preprocessed/normalization}
 PROT_NORM_DATATYPES=${PROT_NORM_DATATYPES:-gene,iso_log}
 PROT_BATCH_ANNOT_DIR=${PROT_BATCH_ANNOT_DIR:-02_proteomics/data/batch_annotation}
 
 # Batch correction
-PROT_BATCH_IN_DIR=${PROT_BATCH_IN_DIR:-02_proteomics/out/preprocessed/normalization}
+PROT_BATCH_IN_DIR=${PROT_BATCH_IN_DIR:-$PROT_NORM_OUT_DIR}
 PROT_BATCH_OUT_DIR=${PROT_BATCH_OUT_DIR:-02_proteomics/out/preprocessed/batch_corrected}
 PROT_BATCH_DATATYPES=${PROT_BATCH_DATATYPES:-gene,iso_log}
 PROT_RUV_K=${PROT_RUV_K:-1}
+PROT_BATCH_METHOD=${PROT_BATCH_METHOD:-none}   # ruv, combat, or none
 PROT_BATCH_ANNOT_DIR=${PROT_BATCH_ANNOT_DIR:-02_proteomics/data/batch_annotation}
 
 # Filtering
-PROT_FILTER_IN_DIR=${PROT_FILTER_IN_DIR:-02_proteomics/out/preprocessed/batch_corrected}
+PROT_FILTER_IN_DIR_WAS_DEFAULT="false"
+if [[ -z "${PROT_FILTER_IN_DIR+x}" ]]; then
+  PROT_FILTER_IN_DIR="$PROT_BATCH_OUT_DIR"
+  PROT_FILTER_IN_DIR_WAS_DEFAULT="true"
+fi
 PROT_FILTER_OUT_DIR=${PROT_FILTER_OUT_DIR:-02_proteomics/out/preprocessed/filtered}
 PROT_FILTER_MIN_PROP=${PROT_FILTER_MIN_PROP:-0.2}
 PROT_FILTER_DATATYPES=${PROT_FILTER_DATATYPES:-gene,iso_log}
 PROT_FILTER_CLIN_DIR=${PROT_FILTER_CLIN_DIR:-02_proteomics/data/clinical}
 PROT_PLOT_RAW_DIR=${PROT_PLOT_RAW_DIR:-02_proteomics/data}
 PROT_PLOT_OUT_DIR=${PROT_PLOT_OUT_DIR:-02_proteomics/out/preprocessed/plots/preprocess_summary}
+
+BATCH_CORRECTION_METHOD_NONE="false"
+if [[ "${PROT_BATCH_METHOD,,}" == "none" ]]; then
+  BATCH_CORRECTION_METHOD_NONE="true"
+  if [[ "$PROT_FILTER_IN_DIR_WAS_DEFAULT" == "true" ]]; then
+    PROT_FILTER_IN_DIR="$PROT_NORM_OUT_DIR"
+  fi
+fi
 
 collect_dataset_ids() {
   local root="$1"
@@ -81,11 +101,15 @@ echo "Clinical merged: $PROT_CLINICAL_ALL"
 echo "Gene dir: $PROT_GENE_DIR"
 echo "Clinical out dir: $PROT_CLINICAL_DIR"
 echo "Cancer config: $PROT_CANCER_CONFIG"
+echo "RUN_LOG_TRANSFORM: $RUN_LOG_TRANSFORM"
 echo "RUN_SPLIT_CLINICAL: $RUN_SPLIT_CLINICAL"
 echo "RUN_CYCLIC_LOESS: $RUN_CYCLIC_LOESS"
 echo "RUN_RUV_BATCH: $RUN_RUV_BATCH"
 echo "RUN_FILTER_POS_EXPR: $RUN_FILTER_POS_EXPR"
 echo "RUN_PREPROCESS_PLOTS: $RUN_PREPROCESS_PLOTS"
+echo "PROT_LOG_IN_DIR: $PROT_LOG_IN_DIR"
+echo "PROT_LOG_OUT_DIR: $PROT_LOG_OUT_DIR"
+echo "PROT_LOG_DATATYPES: $PROT_LOG_DATATYPES"
 echo "PROT_NORM_DATA_ROOT: $PROT_NORM_DATA_ROOT"
 echo "PROT_NORM_OUT_DIR: $PROT_NORM_OUT_DIR"
 echo "PROT_NORM_DATATYPES: $PROT_NORM_DATATYPES"
@@ -93,6 +117,7 @@ echo "PROT_BATCH_IN_DIR: $PROT_BATCH_IN_DIR"
 echo "PROT_BATCH_OUT_DIR: $PROT_BATCH_OUT_DIR"
 echo "PROT_BATCH_DATATYPES: $PROT_BATCH_DATATYPES"
 echo "PROT_RUV_K: $PROT_RUV_K"
+echo "PROT_BATCH_METHOD: $PROT_BATCH_METHOD"
 echo "PROT_BATCH_ANNOT_DIR: $PROT_BATCH_ANNOT_DIR"
 echo "PROT_FILTER_IN_DIR: $PROT_FILTER_IN_DIR"
 echo "PROT_FILTER_OUT_DIR: $PROT_FILTER_OUT_DIR"
@@ -207,9 +232,26 @@ run_cyclic_loess_norm() {
 }
 
 run_ruv_batch() {
-  local script="$PREPROCESS_DIR/03_ruv_batch_correct.R"
+  local method="${PROT_BATCH_METHOD,,}"
+  local script
+  case "$method" in
+    none)
+      echo "[SKIP] Batch correction disabled via PROT_BATCH_METHOD=none"
+      return 0
+      ;;
+    ruv|"")
+      script="$PREPROCESS_DIR/03_ruv_batch_correct.R"
+      ;;
+    combat)
+      script="$PREPROCESS_DIR/03_combat_batch_correct.R"
+      ;;
+    *)
+      echo "[ERROR] Unknown PROT_BATCH_METHOD: $PROT_BATCH_METHOD (expected ruv or combat)" >&2
+      return 1
+      ;;
+  esac
   if [[ "$RUN_RUV_BATCH" != "true" ]]; then
-    echo "[SKIP] RUV batch correction disabled"
+    echo "[SKIP] Batch correction disabled"
     return 0
   fi
 
@@ -232,9 +274,58 @@ run_ruv_batch() {
 
   mkdir -p "$PROT_BATCH_OUT_DIR"
   for dataset in "${targets[@]}"; do
-    echo "[RUN] RUV batch correction for $dataset"
+    echo "[RUN] ${PROT_BATCH_METHOD^^} batch correction for $dataset"
+    if [[ "$method" == "ruv" ]]; then
+      conda run -p "$R_ENV" --no-capture-output Rscript "$script" \
+        "$PROT_BATCH_IN_DIR" "$PROT_BATCH_OUT_DIR" "$PROT_RUV_K" "$PROT_BATCH_DATATYPES" "$dataset" "$PROT_BATCH_ANNOT_DIR"
+    else
+      conda run -p "$R_ENV" --no-capture-output Rscript "$script" \
+        "$PROT_BATCH_IN_DIR" "$PROT_BATCH_OUT_DIR" "$PROT_BATCH_DATATYPES" "$dataset" "$PROT_BATCH_ANNOT_DIR"
+    fi
+  done
+}
+
+# Log transform
+run_log_transform() {
+  local script="$PREPROCESS_DIR/00_log_transform.R"
+  if [[ "$RUN_LOG_TRANSFORM" != "true" ]]; then
+    echo "[SKIP] Log transform disabled"
+    return 0
+  fi
+
+  if [[ ! -d "$PROT_LOG_IN_DIR" ]]; then
+    echo "[ERROR] Missing proteomics input directory: $PROT_LOG_IN_DIR" >&2
+    return 1
+  fi
+
+  mapfile -t DATASETS < <(collect_dataset_ids "$PROT_LOG_IN_DIR")
+  if [[ ${#DATASETS[@]} -eq 0 ]]; then
+    echo "[WARN] No datasets found under $PROT_LOG_IN_DIR/gene"
+    return 0
+  fi
+
+  mkdir -p "$PROT_LOG_OUT_DIR"
+  filter_datasets_for_study "$CURRENT_STUDY" "${DATASETS[@]}"
+  local tasks=("${FILTERED_DATASETS[@]}")
+  if [[ ${#tasks[@]} -eq 0 ]]; then
+    if [[ -n "$CURRENT_STUDY" ]]; then
+      echo "[SKIP] No log-transform datasets found for study $CURRENT_STUDY"
+    else
+      echo "[SKIP] No log-transform datasets available"
+    fi
+    return 0
+  fi
+
+  local joined
+  joined=$(echo "$PROT_LOG_DATATYPES" | tr -d ' ')
+
+  for ds in "${tasks[@]}"; do
+    echo "[RUN] Log transform for $ds"
     conda run -p "$R_ENV" --no-capture-output Rscript "$script" \
-      "$PROT_BATCH_IN_DIR" "$PROT_BATCH_OUT_DIR" "$PROT_RUV_K" "$PROT_BATCH_DATATYPES" "$dataset" "$PROT_BATCH_ANNOT_DIR"
+      "$PROT_LOG_IN_DIR" \
+      "$PROT_LOG_OUT_DIR" \
+      "$joined" \
+      "$ds"
   done
 }
 
@@ -250,43 +341,47 @@ run_filter_positive_expr() {
     return 1
   fi
 
-  mapfile -t DATASETS < <(collect_dataset_ids_no_ref "$PROT_FILTER_IN_DIR")
-  if [[ ${#DATASETS[@]} -eq 0 ]]; then
-    echo "[WARN] No datasets found under $PROT_FILTER_IN_DIR/gene"
-    return 0
-  fi
-
   mkdir -p "$PROT_FILTER_OUT_DIR"
-  filter_datasets_for_study "$CURRENT_STUDY" "${DATASETS[@]}"
-  local tasks=("${FILTERED_DATASETS[@]}")
-  if [[ ${#tasks[@]} -eq 0 ]]; then
-    if [[ -n "$CURRENT_STUDY" ]]; then
-      echo "[SKIP] No filtering datasets found for study $CURRENT_STUDY"
-    else
-      echo "[SKIP] No filtering datasets available"
-    fi
-    return 0
+  local target_prefix=""
+  if [[ -n "$CURRENT_STUDY" ]]; then
+    target_prefix="$CURRENT_STUDY"
+    echo "[RUN] Filtering datasets for study prefix $CURRENT_STUDY"
+  else
+    echo "[RUN] Filtering all datasets"
   fi
 
-  for dataset in "${tasks[@]}"; do
-    echo "[RUN] Filtering for $dataset"
-    conda run -p "$R_ENV" --no-capture-output Rscript "$script" \
-      "$PROT_FILTER_IN_DIR" "$PROT_FILTER_OUT_DIR" "$PROT_FILTER_MIN_PROP" \
-      "$PROT_FILTER_DATATYPES" "$PROT_FILTER_CLIN_DIR" "$dataset"
-  done
+  conda run -p "$R_ENV" --no-capture-output Rscript "$script" \
+    "$PROT_FILTER_IN_DIR" \
+    "$PROT_FILTER_OUT_DIR" \
+    "$PROT_FILTER_MIN_PROP" \
+    "$PROT_FILTER_DATATYPES" \
+    "$PROT_FILTER_CLIN_DIR" \
+    "$target_prefix"
 }
 
+script="$PREPROCESS_DIR/04_plots.R"
 run_preprocess_plots() {
   local script="$PREPROCESS_DIR/04_plots.R"
   if [[ "$RUN_PREPROCESS_PLOTS" != "true" ]]; then
     echo "[SKIP] Preprocess plotting disabled"
     return 0
   fi
-  if [[ ! -d "$PROT_FILTER_OUT_DIR" ]]; then
-    echo "[ERROR] Plotting requires filtered output dir: $PROT_FILTER_OUT_DIR" >&2
+  if [[ "$BATCH_CORRECTION_METHOD_NONE" == "true" ]]; then
+    echo "[SKIP] Preprocess plotting requires batch correction outputs; skipped because PROT_BATCH_METHOD=none"
+    return 0
+  fi
+  if [[ ! -f "$script" ]]; then
+    echo "[ERROR] Plot script not found: $script" >&2
     return 1
   fi
-  local batch_dir="$PROT_BATCH_ANNOT_DIR"
+  if [[ ! -d "$PROT_NORM_OUT_DIR/gene" ]]; then
+    echo "[ERROR] Missing normalized gene directory: $PROT_NORM_OUT_DIR/gene" >&2
+    return 1
+  fi
+  if [[ ! -d "$PROT_BATCH_OUT_DIR/gene" ]]; then
+    echo "[ERROR] Missing batch-corrected gene directory: $PROT_BATCH_OUT_DIR/gene" >&2
+    return 1
+  fi
   mkdir -p "$PROT_PLOT_OUT_DIR"
   if [[ -n "$CURRENT_STUDY" ]]; then
     echo "[RUN] Preprocess plotting for study $CURRENT_STUDY"
@@ -294,7 +389,7 @@ run_preprocess_plots() {
       "$PROT_PLOT_RAW_DIR" \
       "$PROT_NORM_OUT_DIR" \
       "$PROT_BATCH_OUT_DIR" \
-      "$batch_dir" \
+      "$PROT_BATCH_ANNOT_DIR" \
       "$PROT_PLOT_OUT_DIR" \
       "$CURRENT_STUDY"
   else
@@ -303,13 +398,14 @@ run_preprocess_plots() {
       "$PROT_PLOT_RAW_DIR" \
       "$PROT_NORM_OUT_DIR" \
       "$PROT_BATCH_OUT_DIR" \
-      "$batch_dir" \
+      "$PROT_BATCH_ANNOT_DIR" \
       "$PROT_PLOT_OUT_DIR"
   fi
 }
 
 # Add more preprocess steps here as they are implemented
 run_split_clinical
+run_log_transform
 run_cyclic_loess_norm
 run_ruv_batch
 run_filter_positive_expr
