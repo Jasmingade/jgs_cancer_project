@@ -3,6 +3,7 @@
 Thumbs.db
 
 # Project-specific ignores
+.vscode
 01_transcriptomics/data
 01_transcriptomics/out
 01_transcriptomics/logs
