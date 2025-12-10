@@ -19,7 +19,7 @@ Thumbs.db
 03_cross_summary/logs
 03_cross_summary/out_none
 03_cross_summary/out_ruv
-03_cross_summary/scripts/plots
+03_cross_summary/plots
 
 # R / renv
 .Rproj.user/
