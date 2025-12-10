@@ -61,10 +61,11 @@ clean_stage <- function(x) {
   bad_idx[is.na(bad_idx)] <- FALSE
   vals[bad_idx] <- NA_character_
   out <- rep(NA_character_, length(vals))
-  has <- grepl("(stage\\s*)?(i{1,3}|iv)([abcd])?", vals, perl = TRUE)
+  roman_pat <- "(stage\\s*)?(iv|iii|ii|i)([abcd])?"
+  has <- grepl(roman_pat, vals, perl = TRUE)
   has[is.na(has)] <- FALSE
   if (any(has, na.rm = TRUE)) {
-    sub_stage <- sub(".*?(stage\\s*)?(i{1,3}|iv)([abcd])?.*", "\\2", vals[has], perl = TRUE)
+    sub_stage <- sub(paste0(".*?", roman_pat, ".*"), "\\2", vals[has], perl = TRUE)
     out[has] <- toupper(sub_stage)
   }
   out

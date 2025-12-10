@@ -40,7 +40,7 @@ cancers  <- as.character(cancers)
 # ---- covariates config ----
 cov_cfg  <- yaml::read_yaml("02_proteomics/config/covariates.yaml")
 
-out_dir <- "02_proteomics/out/plots/sanity/model0_sanity"
+out_dir <- "02_proteomics/out/plots/sanity/"
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 

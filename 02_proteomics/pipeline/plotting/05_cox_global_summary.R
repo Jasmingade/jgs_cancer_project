@@ -103,7 +103,8 @@ read_cox_file <- function(path) {
   if (is.null(dt)) return(NULL)
   if (!all(c("feature","beta","HR","p","FDR") %in% names(dt))) return(NULL)
 
-  dt[, feature_id := feature]
+  dt[, feature_id := as.character(feature)]
+  dt[, feature := NULL]
   dt[, data_type  := meta$dtype]
   dt[, study      := meta$study_id]
   dt[, cancer     := meta$study_id]
@@ -119,6 +120,7 @@ read_cox_file <- function(path) {
                             fifelse(logHR < 0, "protective", "neutral"))]
 
   dt[, gene_id := map_feature_to_gene(data_type, feature_id)]
+  dt[, gene_id := as.character(gene_id)]
   dt[, gene_name := map_feature_to_gene_name(data_type, feature_id, gene_id)]
   dt[, gene_name := fifelse(is.na(gene_name) | gene_name == "", gene_id, gene_name)]
   dt[, gene    := gene_name]

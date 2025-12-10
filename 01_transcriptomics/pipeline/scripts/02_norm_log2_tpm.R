@@ -131,6 +131,27 @@ datatype <- if (nzchar(datatype_env)) datatype_env else {
 say("Detected datatype: %s", datatype)
 
 # ============================================================
+# Feature filtering (≥1 TPM in ≥10% samples)
+# ============================================================
+if (datatype %in% c("gene", "iso_log")) {
+  min_tpm <- 1
+  min_prop <- 0.10
+  sample_n <- ncol(X)
+  det_counts <- rowSums(X >= min_tpm, na.rm = TRUE)
+  keep_mask <- (det_counts / sample_n) >= min_prop
+  removed <- sum(!keep_mask)
+  if (removed > 0) {
+    say("[FILTER] Removing %d/%d features (<%.0f%% samples with TPM ≥ %.1f)",
+        removed, length(keep_mask), min_prop * 100, min_tpm)
+    X <- X[keep_mask, , drop = FALSE]
+  } else {
+    say("[FILTER] All features pass TPM detection threshold (≥ %.1f TPM in ≥ %.0f%% samples)",
+        min_tpm, min_prop * 100)
+  }
+  say("[FILTER] Remaining features: %d", nrow(X))
+}
+
+# ============================================================
 # Normalization
 # ============================================================
 out_dir <- dirname(out_expr)

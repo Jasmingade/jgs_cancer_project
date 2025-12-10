@@ -5,7 +5,7 @@
 #SBATCH --mem=32G
 #SBATCH --output=01_transcriptomics/logs/05_plots/%x-%A_%a.log
 #SBATCH --error=01_transcriptomics/logs/05_plots/%x-%A_%a.err
-#SBATCH --array=3-4
+#SBATCH --array=0-2
 
 set -euo pipefail
 
@@ -25,15 +25,15 @@ mkdir -p "$LOGDIR" "$OUTDIR"
 #
 # sbatch --export=RUN_PLOT_M0=true,RUN_PLOT_M1=false,...
 # =====================================================================
-export RUN_PLOT_M0=${RUN_PLOT_M0:-false}
-export RUN_PLOT_M1=${RUN_PLOT_M1:-false}
-export RUN_PLOT_M2=${RUN_PLOT_M2:-false}
+export RUN_PLOT_M0=${RUN_PLOT_M0:-true}
+export RUN_PLOT_M1=${RUN_PLOT_M1:-true}
+export RUN_PLOT_M2=${RUN_PLOT_M2:-true}
 export RUN_PLOT_M3=${RUN_PLOT_M3:-true}
 export RUN_PLOT_M4=${RUN_PLOT_M4:-true}
-export RUN_PLOT_M5=${RUN_PLOT_M5:-false}
+export RUN_PLOT_M5=${RUN_PLOT_M5:-true}
 
 # Default for whether models should use *_full results (for p-hists)
-export M1_USE_FULL_RESULTS=${M1_USE_FULL_RESULTS:-false}
+export M1_USE_FULL_RESULTS=${M1_USE_FULL_RESULTS:-true}
 export M2_USE_FULL_RESULTS=${M2_USE_FULL_RESULTS:-false}
 export M3_USE_FULL_RESULTS=${M3_USE_FULL_RESULTS:-false}
 

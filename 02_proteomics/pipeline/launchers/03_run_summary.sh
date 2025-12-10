@@ -17,10 +17,10 @@ SUMMARY_SCRIPT="02_proteomics/pipeline/plotting/05_cox_global_summary.R"
 SUMMARY_PLOT_SCRIPT="02_proteomics/pipeline/plotting/06_cox_global_plots.R"
 LOGDIR="02_proteomics/logs/summary"
 
-COX_ROOT="${COX_ROOT:-02_proteomics/out/normal/cox/univariate}"
-SUMMARY_OUT_ROOT="${SUMMARY_OUT_ROOT:-02_proteomics/out/normal/summary}"
+COX_ROOT="${COX_ROOT:-02_proteomics/out/cox_filtered}"
+SUMMARY_OUT_ROOT="${SUMMARY_OUT_ROOT:-02_proteomics/out/summary}"
 SUMMARY_FDR="${SUMMARY_FDR:-0.05}"
-RUN_SUMMARY_EXPORT="${RUN_SUMMARY_EXPORT:-false}"
+RUN_SUMMARY_EXPORT="${RUN_SUMMARY_EXPORT:-true}"
 RUN_SUMMARY_PLOTS="${RUN_SUMMARY_PLOTS:-true}"
 
 mkdir -p "$LOGDIR" "$SUMMARY_OUT_ROOT"

@@ -6,10 +6,18 @@ Thumbs.db
 01_transcriptomics/data
 01_transcriptomics/out
 01_transcriptomics/logs
+01_transcriptomics/out_
+01_transcriptomics/pipeline/deleted?
 
 02_proteomics/data
 02_proteomics/out
 02_proteomics/logs
+02_proteomics/out_ruv
+
+03_cross_summary/out
+03_cross_summary/logs
+03_cross_summary/out_none
+03_cross_summary/out_ruv
 
 # R / renv
 .Rproj.user/

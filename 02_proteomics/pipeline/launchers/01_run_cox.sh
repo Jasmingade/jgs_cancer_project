@@ -5,7 +5,7 @@
 #SBATCH --mem=36G
 #SBATCH --output=02_proteomics/logs/cox/cox_%A_%a.log
 #SBATCH --error=02_proteomics/logs/cox/cox_%A_%a.err
-#SBATCH --array=0-14
+#SBATCH --array=1-1
 
 #set -eu pipefail
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -14,12 +14,12 @@ conda deactivate || true
 
 
 R_ENV="${R_ENV:-/home/people/s184275/r-env}"
-EXPR_ROOT="${EXPR_ROOT:-02_proteomics/out/preprocessed_none/filtered}"
+EXPR_ROOT="${EXPR_ROOT:-02_proteomics/out/preprocessed/filtered}"
 CLIN_DIR="${CLIN_DIR:-02_proteomics/data/clinical}"
 COV_YAML="${COV_YAML:-02_proteomics/config/covariates.yaml}"
 
 
-OUT_BASE="${OUT_BASE:-02_proteomics/out/cox_none_quan}"
+OUT_BASE="${OUT_BASE:-02_proteomics/out/ruv}"
 
 RUN_COX_PER_TYPE=${RUN_COX_PER_TYPE:-true}
 RUN_COX_UNIV=${RUN_COX_UNIV:-true}

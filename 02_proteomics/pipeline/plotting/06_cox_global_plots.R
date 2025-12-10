@@ -49,11 +49,97 @@ direction_cols <- c(
 # ------------------------------------------------------------------
 # Overlap composition plot (Pattern counts per cancer)
 # ------------------------------------------------------------------
+pattern_levels <- c(
+  "gene",
+  "iso_log",
+  "iso_frac",
+  "gene+iso_log",
+  "gene+iso_frac",
+  "iso_frac+iso_log",
+  "gene+iso_log+iso_frac"
+)
+
+if (file.exists(pattern_path)) {
+  pattern_counts <- fread(pattern_path)
+  pattern_counts[, pattern := factor(pattern, levels = pattern_levels)]
+  pattern_counts[, cancer := factor(cancer, levels = sort(unique(sig_dt$cancer)))]
+} else {
+  by_gene <- sig_dt[, .(types = list(sort(unique(data_type)))),
+                    by = .(cancer, study, gene_id)]
+  by_gene[, pattern := vapply(types, function(x) paste(x, collapse = "+"), character(1))]
+  by_gene[, pattern := factor(pattern, levels = pattern_levels)]
+  pattern_counts <- by_gene[, .N, by = .(cancer, pattern)]
+  pattern_counts <- pattern_counts[!is.na(pattern)]
+  all_cancers <- sort(unique(by_gene$cancer))
+  pattern_counts <- pattern_counts[
+    CJ(cancer = all_cancers,
+       pattern = factor(pattern_levels, levels = pattern_levels),
+       unique = TRUE),
+    on = .(cancer, pattern)]
+  pattern_counts[is.na(N), N := 0]
+}
+
+pattern_palette <- c(
+  "gene" = "#0072B2",
+  "iso_log" = "#009E73",
+  "iso_frac" = "#E69F00",
+  "gene+iso_log" = "#54B2BE",
+  "gene+iso_frac" = "#7DB4D6",
+  "iso_frac+iso_log" = "#D6B642",
+  "gene+iso_log+iso_frac" = "#9B89C6"
+)
+
+plot_overlap <- ggplot(pattern_counts,
+                       aes(x = cancer, y = N, fill = pattern)) +
+  geom_col(position = "fill", colour = "white") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_manual(values = pattern_palette, drop = FALSE, na.translate = FALSE) +
+  labs(
+    x = "Cancer",
+    y = "Proportion of significant genes",
+    fill = "Significant in",
+    title = "Overlap of FDR-significant genes across data types"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(file.path(summary_dir, "plot_overlap_composition.png"),
+       plot_overlap, width = 15, height = 9, dpi = 300)
+say("[plots] Saved overlap composition plot")
 
 
 # ------------------------------------------------------------------
 # Jaccard similarity heatmap
 # ------------------------------------------------------------------
+jaccard <- function(a, b) {
+  a <- unique(a); b <- unique(b)
+  if (!length(a) && !length(b)) return(NA_real_)
+  if (!length(union(a, b))) return(NA_real_)
+  if (!length(a) || !length(b)) return(0)
+  length(intersect(a, b)) / length(union(a, b))
+}
+
+jac <- sig_dt[, {
+  g  <- unique(gene_id[data_type == "gene"])
+  il <- unique(gene_id[data_type == "iso_log"])
+  ifr<- unique(gene_id[data_type == "iso_frac"])
+  data.table(
+    pair = c("gene-iso_log","gene-iso_frac","iso_log-iso_frac"),
+    J    = c(jaccard(g, il), jaccard(g, ifr), jaccard(il, ifr))
+  )
+}, by = cancer]
+
+plot_jaccard <- ggplot(jac, aes(x = pair, y = cancer, fill = J)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(name = "Jaccard\nsimilarity", na.value = "grey90") +
+  labs(x = "", y = "Cancer", title = "Similarity of significant gene sets") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(file.path(summary_dir, "plot_jaccard_heatmap.png"),
+       plot_jaccard, width = 7, height = max(4, 0.4 * length(unique(jac$cancer))), dpi = 300)
+say("[plots] Saved Jaccard heatmap")
+
 
 # ------------------------------------------------------------------
 # Isoform-focused summaries and lollipop plots
@@ -628,19 +714,104 @@ for (cc in cancers_all) {
 }
 
 
-
-
-
-
-
 # ------------------------------------------------------------------
 # Significant count plots (with/without direction)
 # ------------------------------------------------------------------
+count_dt <- sig_dt[, .N, by = .(cancer, data_type, direction)]
+count_dt[, cancer := factor(cancer, levels = sort(unique(cancer)))]
+direction_levels <- c("risk", "protective", "neutral")
+count_dt[, direction := factor(direction, levels = direction_levels)]
 
+plot_counts <- ggplot(
+  count_dt,
+  aes(x = cancer, y = N, fill = data_type, colour = direction)
+) +
+  geom_col(position = position_dodge(width = 0.85), width = 0.6, linewidth = 0.5) +
+  scale_fill_manual(values = type_colors, drop = FALSE, name = "Data type") +
+  scale_colour_manual(values = direction_cols, drop = FALSE, name = "Direction") +
+  scale_y_log10(labels = comma_format(accuracy = 1)) +
+  labs(
+    x = "Cancer",
+    y = "# of significant features",
+    title = sprintf("Significant features per cancer and data type (%s)", fdr_label)
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(file.path(summary_dir, "plot_significant_counts.png"),
+       plot_counts, width = 18, height = 8, dpi = 300)
+say("[plots] Saved directional counts plot")
+
+count_simple <- sig_dt[, .N, by = .(cancer, data_type)]
+count_simple <- count_simple[N > 0]
+count_simple[, cancer := factor(cancer, levels = sort(unique(cancer)))]
+
+plot_counts_simple <- ggplot(count_simple,
+                             aes(x = cancer, y = N, fill = data_type)) +
+  geom_col(position = "stack", width = 0.7) +
+  scale_fill_manual(values = type_colors, drop = FALSE, name = "Data type") +
+  scale_y_log10(labels = comma_format(accuracy = 1)) +
+  labs(
+    x = "Cancer",
+    y = "# of significant features",
+    title = sprintf("Significant features per cancer (%s)", fdr_label)
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(file.path(summary_dir, "plot_significant_counts_simple.png"),
+       plot_counts_simple, width = 18, height = 8, dpi = 300)
+say("[plots] Saved stacked counts plot")
 
 # ------------------------------------------------------------------
 # Diverging proportion plot (risk vs protective)
 # ------------------------------------------------------------------
+sum_dt <- sig_dt[, .(
+  risk       = sum(direction == "risk"),
+  protective = sum(direction == "protective"),
+  neutral    = sum(direction == "neutral")
+), by = .(cancer, data_type)]
+
+pyr_dt <- melt(
+  sum_dt,
+  id.vars = c("cancer", "data_type"),
+  variable.name = "direction",
+  value.name = "n"
+)
+
+pyr_dt[, n_signed := fifelse(direction == "protective", -n,
+                      fifelse(direction == "risk", n, 0))]
+
+cancer_order <- sig_dt[, .N, by = cancer][order(-N), cancer]
+pyr_dt[, cancer := factor(cancer, levels = cancer_order)]
+pyr_dt[, direction := factor(direction, levels = direction_levels)]
+
+pyr_prop <- copy(pyr_dt)
+pyr_prop[, total_abs := sum(abs(n_signed)), by = .(cancer, data_type)]
+pyr_prop[, prop_signed := ifelse(total_abs > 0, n_signed / total_abs, 0)]
+
+pyr_prop_main <- pyr_prop[direction %in% c("risk", "protective")]
+
+plot_diverging <- ggplot(pyr_prop_main,
+                         aes(x = prop_signed, y = cancer, fill = direction)) +
+  geom_col(width = 0.6, colour = "white") +
+  facet_wrap(~ data_type, ncol = 1) +
+  scale_x_continuous(labels = percent_format(accuracy = 1),
+                     name = "Proportion of significant features") +
+  scale_fill_manual(values = direction_cols[c("risk", "protective")],
+                    drop = FALSE, name = "Direction") +
+  labs(y = "Cancer",
+       title = "Proportion of risk vs protective features") +
+  theme_bw() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    axis.text.x = element_text(size = 8),
+    panel.grid.major.y = element_blank()
+  )
+
+ggsave(file.path(summary_dir, "plot_diverging_props.png"),
+       plot_diverging, width = 10, height = 8, dpi = 300)
+say("[plots] Saved diverging proportion plot")
 
 
 say("[plots] Finished Cox summary plotting for %s", summary_dir)

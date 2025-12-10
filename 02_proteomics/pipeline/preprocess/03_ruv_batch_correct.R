@@ -309,7 +309,7 @@ process_file <- function(file, dtype) {
         Y <- t(full_mat)
         ctl_vec <- control_idx
         M <- ruv::replicate.matrix(replicate_labels)
-        fit <- ruv::RUVIII(Y = Y, M = M, ctl = ctl_vec, k = k_use, return.info = TRUE)
+        fit <- ruv::RUVIII(Y = Y, M = M, ctl = ctl_vec, k = k_use, return.info = TRUE, inputcheck = TRUE)
         adj <- if (is.list(fit)) fit$newY else fit
         corrected_full <- t(adj)
         rownames(corrected_full) <- rownames(full_mat)

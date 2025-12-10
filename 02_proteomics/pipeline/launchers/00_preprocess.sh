@@ -55,7 +55,7 @@ PROT_BATCH_IN_DIR=${PROT_BATCH_IN_DIR:-$PROT_NORM_OUT_DIR}
 PROT_BATCH_OUT_DIR=${PROT_BATCH_OUT_DIR:-02_proteomics/out/preprocessed/batch_corrected}
 PROT_BATCH_DATATYPES=${PROT_BATCH_DATATYPES:-gene,iso_log}
 PROT_RUV_K=${PROT_RUV_K:-1}
-PROT_BATCH_METHOD=${PROT_BATCH_METHOD:-none}   # ruv, combat, or none
+PROT_BATCH_METHOD=${PROT_BATCH_METHOD:-ruv}   # ruv, combat, or none
 PROT_BATCH_ANNOT_DIR=${PROT_BATCH_ANNOT_DIR:-02_proteomics/data/batch_annotation}
 
 # Filtering

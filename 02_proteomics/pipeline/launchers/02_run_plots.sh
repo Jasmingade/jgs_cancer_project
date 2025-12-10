@@ -16,18 +16,17 @@ R_ENV="${R_ENV:-/home/people/s184275/r-env}"
 PLOT_DIR="02_proteomics/pipeline/plotting"
 LOG_DIR="02_proteomics/logs/plots"
 
-FILTERED_ROOT="${FILTERED_ROOT:-02_proteomics/out/normal/preprocessed/filtered}"
-COX_ROOT="${COX_ROOT:-02_proteomics/out/normal/cox}"
-COX_FILTERED_ROOT="${COX_FILTERED_ROOT:-02_proteomics/out/normal/cox_filtered}"
+FILTERED_ROOT="${FILTERED_ROOT:-02_proteomics/out/preprocessed/filtered}"
+COX_ROOT="${COX_ROOT:-02_proteomics/out/ruv/univariate}"
+COX_FILTERED_ROOT="${COX_FILTERED_ROOT:-02_proteomics/out/cox_filtered}"
 PLOT_CI_WIDTH_MAX="${PLOT_CI_WIDTH_MAX:-10}"
-SANITY_OUT="${SANITY_OUT:-02_proteomics/out/normal/plots/sanity}"
-EXPR_OUT="${EXPR_OUT:-02_proteomics/out/normal/plots/expression}"
-FOREST_OUT="${FOREST_OUT:-02_proteomics/out/normal/plots/forest}"
-
-RUN_PLOT_SANITY=${RUN_PLOT_SANITY:-false}
-RUN_FILTER_COX_OUTPUT=${RUN_FILTER_COX_OUTPUT:-true}
+SANITY_OUT="${SANITY_OUT:-02_proteomics/out/plots/sanity}"
+EXPR_OUT="${EXPR_OUT:-02_proteomics/out/plots/expression}"
+FOREST_OUT="${FOREST_OUT:-02_proteomics/out/plots/forest}"
+RUN_PLOT_SANITY=${RUN_PLOT_SANITY:-true}
+RUN_FILTER_COX_OUTPUT=${RUN_FILTER_COX_OUTPUT:-false}
 RUN_PLOT_EXPRESSION=${RUN_PLOT_EXPRESSION:-false}
-RUN_PLOT_FOREST=${RUN_PLOT_FOREST:-true}
+RUN_PLOT_FOREST=${RUN_PLOT_FOREST:-false}
 FOREST_FDR_THRESHOLD=${FOREST_FDR_THRESHOLD:-0.05}
 FOREST_TOP_N=${FOREST_TOP_N:-25}
 

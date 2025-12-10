@@ -45,10 +45,10 @@ mkdir -p "$BASE_LOG" \
 # ============================================================
 # EXECUTION CONTROL
 # ============================================================
-RUN_01=${RUN_01:-false}  # Model 2 ------ Mutation-per-gene (per mutation group)
-RUN_02=${RUN_02:-false}  # Model 3 ------ Model Expression + Mutation combined
-RUN_03=${RUN_03:-true}   # Model 4 ------ Isoform × Mutation interaction
-RUN_04=${RUN_04:-false}  # Model 1 ------ Expression-only
+RUN_01=${RUN_01:-true}  # Model 2 ------ Mutation-per-gene (per mutation group)
+RUN_02=${RUN_02:-true}  # Model 3 ------ Model Expression + Mutation combined
+RUN_03=${RUN_03:-true}  # Model 4 ------ Isoform × Mutation interaction
+RUN_04=${RUN_04:-true}  # Model 1 ------ Expression-only
 
 # Mutation groups
 MUT_GROUPS=(

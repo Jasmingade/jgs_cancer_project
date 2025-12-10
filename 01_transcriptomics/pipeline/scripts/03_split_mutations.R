@@ -2,10 +2,12 @@
 
 # -------------------------------------------------------------------
 # Example:
-#Rscript 01_transcriptomics/pipeline/scripts/03_split_mutations.R \
-#    01_transcriptomics/data/mutation/mc3.v0.2.8.PUBLIC.maf.gz \
-#    01_transcriptomics/data/raw/TCGA_clinical.csv \
-#    ensembl
+'
+Rscript 01_transcriptomics/pipeline/scripts/03_split_mutations.R \
+    01_transcriptomics/data/mutation/mc3.v0.2.8.PUBLIC.maf.gz \
+    01_transcriptomics/data/raw/TCGA_clinical.csv \
+    ensembl
+'
 # -------------------------------------------------------------------
 suppressPackageStartupMessages({
   library(data.table)
