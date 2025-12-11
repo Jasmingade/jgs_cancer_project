@@ -14,12 +14,14 @@ Thumbs.db
 02_proteomics/out
 02_proteomics/logs
 02_proteomics/out_ruv
+02_proteomics/deleted
 
 03_cross_summary/out
 03_cross_summary/logs
 03_cross_summary/out_none
 03_cross_summary/out_ruv
-03_cross_summary/plots
+03_cross_summary/deleted
+03_cross_summary/out_
 
 # R / renv
 .Rproj.user/
