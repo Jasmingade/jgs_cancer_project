@@ -9,19 +9,14 @@ Thumbs.db
 01_transcriptomics/logs
 01_transcriptomics/out_
 01_transcriptomics/pipeline/deleted?
-
 02_proteomics/data
 02_proteomics/out
 02_proteomics/logs
 02_proteomics/out_ruv
 02_proteomics/deleted
+03_cross_summary
 
-03_cross_summary/out
-03_cross_summary/logs
-03_cross_summary/out_none
-03_cross_summary/out_ruv
-03_cross_summary/deleted
-03_cross_summary/out_
+.gitignore
 
 # R / renv
 .Rproj.user/
