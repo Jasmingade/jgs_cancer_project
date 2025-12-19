@@ -16,7 +16,6 @@ Thumbs.db
 02_proteomics/deleted
 03_cross_summary
 
-.gitignore
 
 # R / renv
 .Rproj.user/
@@ -47,3 +46,4 @@ analysis/**/out/*.RData
 
 # Data: keep immutable inputs tracked if small; otherwise ignore heavy
 data/**/large/*
+03_cross_summary/
