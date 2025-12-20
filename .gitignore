@@ -47,3 +47,4 @@ analysis/**/out/*.RData
 # Data: keep immutable inputs tracked if small; otherwise ignore heavy
 data/**/large/*
 03_cross_summary/
+03_cross_summary/
